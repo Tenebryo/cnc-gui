@@ -1,0 +1,9 @@
+file = _{SOI ~ (line | NEWLINE) * }
+line = {word+ ~ NEWLINE}
+word = ${('a'..'z' | 'A'..'Z') ~ number}
+number = ${"-"? ~ major ~ ("." ~ minor)?}
+major = @{ASCII_DIGIT+}
+minor = @{ASCII_DIGIT+}
+
+WHITESPACE = _{" " | "\t"}
+COMMENT = _{"(" ~ (!")" ~ ANY)* ~ ")"}

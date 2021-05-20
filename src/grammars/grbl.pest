@@ -1,0 +1,123 @@
+WHITESPACE = _{"\n"}
+
+float = @{
+    "-"?
+    ~ ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)
+    ~ ("." ~ ASCII_DIGIT*)?
+}
+
+uint = @{("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*)}
+
+ok = @{"ok"}
+error = ${"error:" ~ uint}
+
+response_message = { ok | error }
+
+idle   = @{"Idle"}
+run    = @{"Run"}
+hold   = @{"Hold:" ~ '0'..'1'}
+jog    = @{"Jog"}
+alarm  = @{"Alarm"}
+door   = @{"Door:" ~ '0'..'4'}
+check  = @{"Check"}
+home   = @{"Home"}
+sleep  = @{"Sleep"}
+
+mstate = { (idle | run | hold | jog | alarm | door | check | home | sleep) }
+
+mpos = ${"MPos:" ~ float ~ "," ~ float ~ "," ~ float}
+wpos = ${"WPos:" ~ float ~ "," ~ float ~ "," ~ float}
+wco  = ${"WCO:" ~ float ~ "," ~ float ~ "," ~ float}
+
+buffer_state = ${"Bf:" ~ uint ~ "," ~ uint}
+
+line_number = ${"Ln:" ~ uint}
+
+feed = ${ ("F:" ~ uint) }
+feed_and_speed = ${ ("FS:" ~ uint ~ "," ~ uint) }
+
+inputs = @{ "Pn:" ~ ("X"|"Y"|"Z"|"P"|"D"|"H"|"R"|"S")+ }
+
+overrides = ${ "Ov:" ~ float ~ "," ~ float ~ "," ~ float}
+
+accessories = @{ "Pn:" ~ ("S"|"C"|"F"|"M")+ }
+
+status_item = _{(mstate | mpos | wpos | wco | buffer_state | line_number | feed | feed_and_speed | inputs | overrides | accessories)}
+
+status_message = {
+    "<" 
+    ~ status_item ~ ("|" ~ status_item)*
+    ~ ">"
+}
+
+msg_reset_to_continue = @{"MSG:Reset to continue"}
+msg_unlock = @{"MSG:'$H'|'$X' to unlock"}
+msg_caution = @{"MSG:Caution: Unlocked"}
+msg_enabled = @{"MSG:Enabled"}
+msg_disabled = @{"MSG:Disabled"}
+msg_check_door = @{"MSG:Check Door"}
+msg_check_limits = @{"MSG:Check Limits"}
+msg_program_end = @{"MSG:Pgm End"}
+msg_restoring_spindle = @{"MSG:Restoring spindle"}
+msg_sleeping = @{"MSG:Sleeping"}
+gcode_parser_state = @{"GC:" ~ (!"]" ~ ANY)*}
+help_message = @{"HLP:" ~ (!"]" ~ ANY)*}
+data_query_response = @{
+      ("G54:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G55:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G56:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G57:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G58:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G59:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G28:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G30:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("G92:" ~ float ~ "," ~ float ~ "," ~ float)
+    | ("TLO:" ~ float)
+    | ("PRB:" ~ float ~ "," ~ float ~ "," ~ float ~ ":" ~ '0'..'1')
+}
+
+msg_version = @{"VER:" ~ (!"]" ~ ANY)*}
+msg_options = @{"OPT:" ~ (!"]" ~ ANY)*}
+msg_unknown = @{(!"]" ~ ANY)*}
+
+feedback_message = {
+    "["
+    ~ (
+          msg_reset_to_continue
+        | msg_unlock
+        | msg_caution
+        | msg_enabled
+        | msg_disabled
+        | msg_check_door
+        | msg_check_limits
+        | msg_program_end
+        | msg_restoring_spindle
+        | msg_sleeping
+        | gcode_parser_state
+        | help_message
+        | data_query_response
+        | msg_version
+        | msg_options
+        | msg_unknown
+    )
+    ~ "]"
+}
+
+alarm_message = @{"ALARM:" ~ '0'..'9'}
+
+startup_line = { ">" ~ ANY* ~ ":" ~ response_message }
+
+welcome_message = {"Grbl " ~ (ASCII_DIGIT+) ~ "." ~ (ASCII_ALPHANUMERIC+) ~ " ['$' for help]"}
+
+settings_message = {"$" ~ uint ~ "=" ~ float }
+
+push_message = {
+      status_message
+    | feedback_message
+    | alarm_message
+    | startup_line
+    | welcome_message
+    | settings_message
+}
+
+line = _{ push_message | response_message }
