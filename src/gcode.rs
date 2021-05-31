@@ -36,7 +36,7 @@ pub fn parse<'i>(program : &'i str) -> Vec<GCodeLine<'i>> {
 
             let line = l.as_str();
 
-            let mut words = l.into_inner()
+            let words = l.into_inner()
                 .map(|w| {
                     let letter = w.as_str().chars().next().unwrap().to_ascii_uppercase();
                     let num = w.into_inner().next().unwrap();

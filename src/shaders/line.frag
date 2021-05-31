@@ -1,12 +1,9 @@
-#version 400
+#version 450
 
-uniform float time_interval;
-uniform vec4 tint;
+layout(location = 0) in vec4 f_color;
+layout(location = 1) in float time_interp;
 
-in vec4 f_color;
-in float time_interp;
-
-out vec4 Target0;
+layout(location = 0) out vec4 color;
 
 void main() {
 
@@ -16,5 +13,5 @@ void main() {
   //   Target0 = f_color * 0.2;
   // } else {
   // }
-    Target0 = f_color * tint;
+    color = f_color;
 }
