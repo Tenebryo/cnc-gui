@@ -20,21 +20,19 @@ use vulkano::swapchain::Surface;
 
 
 use vulkano_win::VkSurfaceBuild;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
+
+use winit::event_loop::{EventLoop};
 use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;
 
 use imgui_vulkano_renderer::Renderer;
 
-use imgui::{ClipboardBackend, ImStr, ImString};
 
 use crate::clipboard;
 
 
 pub struct System {
-    pub event_loop: EventLoop<()>,
     pub device : Arc<Device>,
     pub queue : Arc<Queue>,
     pub surface: Arc<Surface<Window>>,
@@ -44,9 +42,12 @@ pub struct System {
     pub platform: WinitPlatform,
     pub renderer: Renderer,
     pub font_size: f32,
+    pub previous_frame_end : Option<Box<dyn GpuFuture>>,
+    pub acquire_future : Option<Box<dyn GpuFuture>>,
+    pub recreate_swapchain : bool,
 }
 
-pub fn init(title: &str) -> System {
+pub fn init(title: &str, event_loop : &EventLoop<()>) -> System {
 
 
     let required_extensions = vulkano_win::required_extensions();
@@ -59,7 +60,6 @@ pub fn init(title: &str) -> System {
         None => title,
     };
 
-    let event_loop = EventLoop::new();
     let surface = WindowBuilder::new()
         .with_title(title.to_owned())
         .build_vk_surface(&event_loop, instance.clone())
@@ -161,8 +161,9 @@ pub fn init(title: &str) -> System {
 
     let renderer = Renderer::init(&mut imgui, device.clone(), queue.clone(), format).expect("Failed to initialize renderer");
 
+    let previous_frame_end = Some(sync::now(device.clone()).boxed());
+
     System {
-        event_loop,
         device,
         queue,
         surface,
@@ -172,151 +173,83 @@ pub fn init(title: &str) -> System {
         platform,
         renderer,
         font_size,
+        previous_frame_end,
+        acquire_future : None,
+        recreate_swapchain : false,
     }
 }
 
-pub struct GraphicsSystem {
-    pub device : Arc<Device>,
-    pub queue : Arc<Queue>,
-    pub surface: Arc<Surface<Window>>,
-    pub swapchain : Arc<Swapchain<Window>>,
-}
-
 impl System {
-    pub fn main_loop<F: FnMut(GraphicsSystem, &mut Renderer, &mut bool, &mut Ui, &Window) + 'static>(self, mut run_ui: F) {
-        let System {
-            event_loop,
-            device,
-            queue,
-            surface,
-            mut swapchain,
-            mut images,
-            mut imgui,
-            mut platform,
-            mut renderer,
-            ..
-        } = self;
+    pub fn start_frame(&mut self) -> Result<(AutoCommandBufferBuilder, Arc<SwapchainImage<Window>>, usize),()> {
 
-        let mut recreate_swapchain = false;
+            
+        self.previous_frame_end.as_mut().unwrap().cleanup_finished();
 
-        let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
+        if self.recreate_swapchain {
+            let dimensions: [u32; 2] = self.surface.window().inner_size().into();
+            let (new_swapchain, new_images) =
+                match self.swapchain.recreate_with_dimensions(dimensions) {
+                    Ok(r) => r,
+                    Err(SwapchainCreationError::UnsupportedDimensions) => return Err(()),
+                    Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+                };
 
-        let mut last_redraw = Instant::now();
+            self.images = new_images;
+            self.swapchain = new_swapchain;
+            self.recreate_swapchain = false;
+        }
 
-        // target 60 fps
-        let target_frame_time = Duration::from_millis(1000 / 60);
+            
+        let (image_num, suboptimal, acquire_future) =
+            match swapchain::acquire_next_image(self.swapchain.clone(), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => {
+                    self.recreate_swapchain = true;
+                    return Err(());
+                }
+                Err(e) => panic!("Failed to acquire next image: {:?}", e),
+            };
 
-        event_loop.run(move |event, _, control_flow| match event {
-            Event::NewEvents(_) => {
-                // imgui.io_mut().update_delta_time(Instant::now());
+        if suboptimal {
+            self.recreate_swapchain = true;
+        }
+
+        self.acquire_future = Some(Box::new(acquire_future));
+
+
+        let cmd_buf_builder = AutoCommandBufferBuilder::new(self.device.clone(), self.queue.family())
+            .expect("Failed to create command buffer");
+
+
+        Ok((cmd_buf_builder, self.images[image_num].clone(), image_num))
+    }
+
+    pub fn end_frame(&mut self, cmd_buf_builder : AutoCommandBufferBuilder, image_num : usize) {
+
+        let cmd_buf = cmd_buf_builder.build()
+            .expect("Failed to build command buffer");
+
+        let future = self.previous_frame_end
+            .take()
+            .unwrap()
+            .join(core::mem::replace(&mut self.acquire_future, None).expect("No acquire future, was `start_frame` called?"))
+            .then_execute(self.queue.clone(), cmd_buf)
+            .unwrap()
+            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                self.previous_frame_end = Some(future.boxed());
             }
-            Event::MainEventsCleared => {
-                platform
-                    .prepare_frame(imgui.io_mut(), &surface.window())
-                    .expect("Failed to prepare frame");
-                surface.window().request_redraw();
+            Err(FlushError::OutOfDate) => {
+                self.recreate_swapchain = true;
+                self.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
             }
-            Event::RedrawRequested(_) => {
-                
-                let t = Instant::now();
-                let since_last = t.duration_since(last_redraw);
-                last_redraw = t;
-
-                if since_last > target_frame_time {
-                    if since_last < target_frame_time {
-                        std::thread::sleep(target_frame_time - since_last);
-                    }
-                }
-                
-                previous_frame_end.as_mut().unwrap().cleanup_finished();
-
-                if recreate_swapchain {
-                    let dimensions: [u32; 2] = surface.window().inner_size().into();
-                    let (new_swapchain, new_images) =
-                        match swapchain.recreate_with_dimensions(dimensions) {
-                            Ok(r) => r,
-                            Err(SwapchainCreationError::UnsupportedDimensions) => return,
-                            Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                        };
-
-                    images = new_images;
-                    swapchain = new_swapchain;
-                    recreate_swapchain = false;
-                }
-
-                let mut ui = imgui.frame();
-
-                let mut run = true;
-                run_ui(GraphicsSystem{
-                    device    : device.clone(),
-                    queue     : queue.clone(),
-                    surface   : surface.clone(),
-                    swapchain : swapchain.clone(),
-                }, &mut renderer, &mut run, &mut ui, surface.window());
-                if !run {
-                    *control_flow = ControlFlow::Exit;
-                }
-                
-                let (image_num, suboptimal, acquire_future) =
-                    match swapchain::acquire_next_image(swapchain.clone(), None) {
-                        Ok(r) => r,
-                        Err(AcquireError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            return;
-                        }
-                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                    };
-
-                if suboptimal {
-                    recreate_swapchain = true;
-                }
-                
-                platform.prepare_render(&ui, surface.window());
-                let draw_data = ui.render();
-
-                let mut cmd_buf_builder = AutoCommandBufferBuilder::new(device.clone(), queue.family())
-                    .expect("Failed to create command buffer");
-
-                cmd_buf_builder.clear_color_image(images[image_num].clone(), [0.0; 4].into())
-                    .expect("Failed to create image clear command");
-
-                renderer
-                    .draw_commands(&mut cmd_buf_builder, queue.clone(), images[image_num].clone(), draw_data)
-                    .expect("Rendering failed");
-
-                let cmd_buf = cmd_buf_builder.build()
-                    .expect("Failed to build command buffer");
-
-                let future = previous_frame_end
-                    .take()
-                    .unwrap()
-                    .join(acquire_future)
-                    .then_execute(queue.clone(), cmd_buf)
-                    .unwrap()
-                    .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
-                    .then_signal_fence_and_flush();
-
-                match future {
-                    Ok(future) => {
-                        previous_frame_end = Some(future.boxed());
-                    }
-                    Err(FlushError::OutOfDate) => {
-                        recreate_swapchain = true;
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
-                    }
-                    Err(e) => {
-                        println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
-                    }
-                }
+            Err(e) => {
+                println!("Failed to flush future: {:?}", e);
+                self.previous_frame_end = Some(sync::now(self.device.clone()).boxed());
             }
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => *control_flow = ControlFlow::Exit,
-            event => {
-                platform.handle_event(imgui.io_mut(), surface.window(), &event);
-            }
-        })
+        }
     }
 }

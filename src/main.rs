@@ -4,7 +4,19 @@
 #[macro_use]
 extern crate pest_derive;
 
+use imgui_renderer::System;
+use vulkano::command_buffer::AutoCommandBufferBuilder;
+
+use vulkano::swapchain;
+use vulkano::swapchain::AcquireError;
+use vulkano::sync;
+use vulkano::sync::{FlushError, GpuFuture};
+
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::ControlFlow;
+
 use ui::UIState;
+use winit::event_loop::EventLoop;
 
 macro_rules! im_strf {
     ($($args:tt)*) => {
@@ -34,15 +46,75 @@ fn main() {
         .enable_all()
         .build()
         .unwrap();
+
+
+    let event_loop = EventLoop::new();
     
-    let mut system = imgui_renderer::init("GRBL Driver");
+    let mut system = imgui_renderer::init("GRBL Driver", &event_loop);
 
     let mut line_renderer = gcode_renderer::GCodeRenderer::init(&system);
 
 
     let mut ui_state = UIState::init();
 
-    system.main_loop(move |system, renderer, _, ui, win| {
-        ui_state.frame(ui, &mut async_runtime, win);
+
+    event_loop.run(move |event, _, control_flow| {
+
+        match event {
+            Event::NewEvents(_) => {
+                // imgui.io_mut().update_delta_time(Instant::now());
+            }
+            Event::MainEventsCleared => {
+                system.platform
+                    .prepare_frame(system.imgui.io_mut(), &system.surface.window())
+                    .expect("Failed to prepare frame");
+                system.surface.window().request_redraw();
+            }
+            Event::RedrawRequested(_) => {
+                
+                // let t = Instant::now();
+                // let since_last = t.duration_since(last_redraw);
+                // last_redraw = t;
+
+                // if since_last > target_frame_time {
+                //     if since_last < target_frame_time {
+                //         std::thread::sleep(target_frame_time - since_last);
+                //     }
+                // }
+
+                if let Ok((mut cmd_buf_builder, swapchain_image, image_num)) = system.start_frame() {
+
+                    let mut ui = system.imgui.frame();
+
+                    let mut run = true;
+
+                    ui_state.frame(&mut ui, &mut async_runtime, system.surface.window());
+
+                    if !run {
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    
+                    system.platform.prepare_render(&ui, system.surface.window());
+                    let draw_data = ui.render();
+
+                    cmd_buf_builder.clear_color_image(swapchain_image.clone(), [0.0; 4].into())
+                        .expect("Failed to create image clear command");
+
+                    system.renderer
+                        .draw_commands(&mut cmd_buf_builder, system.queue.clone(), swapchain_image.clone(), draw_data)
+                        .expect("Rendering failed");
+
+
+                    system.end_frame(cmd_buf_builder, image_num);
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            event => {
+                system.platform.handle_event(system.imgui.io_mut(), system.surface.window(), &event);
+            }
+        }
     });
 }

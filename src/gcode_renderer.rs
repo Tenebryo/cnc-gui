@@ -17,7 +17,7 @@ use vulkano::format::Format;
 pub mod line_fs {vulkano_shaders::shader!{ty: "fragment",path: "src/shaders/line.frag",               include: [],}}
 pub mod line_vs {vulkano_shaders::shader!{ty: "vertex",  path: "src/shaders/line.vert",               include: [],}}
 
-use crate::imgui_renderer::{System, GraphicsSystem};
+use crate::imgui_renderer::{System};
 
 #[derive(Debug, Default)]
 pub struct Vertex{
@@ -34,7 +34,6 @@ pub struct GCodeRenderer {
     pub image : Option<Arc<StorageImage<Format>>>,
     pub vertex_pool : CpuBufferPool<Vertex>,
     pub vertex_buffer : Option<Arc<CpuAccessibleBuffer<[Vertex]>>>,
-    pub previous_frame_end : Option<Box<dyn GpuFuture>>,
     pub texture_id : Option<TextureId>,
 }
 
@@ -94,14 +93,11 @@ impl GCodeRenderer {
             image : None,
             vertex_pool,
             vertex_buffer : None,
-            previous_frame_end : Some(vulkano::sync::now(system.device.clone()).boxed()),
             texture_id : None,
         }
     }
 
-    pub fn render(&mut self, system : &GraphicsSystem, renderer : &mut Renderer, width : u32, height : u32) {
-
-        self.previous_frame_end.as_mut().unwrap().cleanup_finished();
+    pub fn render(&mut self, system : &System, renderer : &mut Renderer, width : u32, height : u32, cmd_buf_builder : &mut AutoCommandBufferBuilder) {
 
         if self.image.as_ref().map(|i| i.dimensions() != Dimensions::Dim2d{width,height}).unwrap_or(true) {
             let image =
@@ -131,10 +127,6 @@ impl GCodeRenderer {
         };
 
         if let Some(ref mut image) = self.image {
-
-            let mut cmd_buf_builder = AutoCommandBufferBuilder::new(system.device.clone(), system.queue.family())
-                .expect("Failed to create command buffer");
-
 
             let depth_buffer = AttachmentImage::transient_input_attachment(system.device.clone(), [width, height], Format::D16Unorm).unwrap();
 
@@ -172,29 +164,6 @@ impl GCodeRenderer {
             cmd_buf_builder.end_render_pass()
                 .expect("Failed to finish render pass");
 
-
-            let cmd_buf = cmd_buf_builder.build()
-                .expect("Failed to build command buffer");
-
-            let future = self.previous_frame_end
-                .take()
-                .unwrap()
-                .then_execute(system.queue.clone(), cmd_buf)
-                .unwrap()
-                .then_signal_fence_and_flush();
-
-            match future {
-                Ok(future) => {
-                    self.previous_frame_end = Some(future.boxed());
-                }
-                Err(FlushError::OutOfDate) => {
-                    self.previous_frame_end = Some(vulkano::sync::now(system.device.clone()).boxed());
-                }
-                Err(e) => {
-                    println!("Failed to flush future: {:?}", e);
-                    self.previous_frame_end = Some(vulkano::sync::now(system.device.clone()).boxed());
-                }
-            }
         }
     }
 }
