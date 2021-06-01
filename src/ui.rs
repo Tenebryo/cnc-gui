@@ -285,6 +285,33 @@ impl UIState {
                         self.active_program = Some(program.clone());
                         line_renderer.create_line_buffer(&self.active_program.as_ref().unwrap().motionpath);
                         self.viewport_needs_update = true;
+
+                        let mut minx = f32::MAX;
+                        let mut miny = f32::MAX;
+
+                        let mut maxx = -f32::MAX;
+                        let mut maxy = -f32::MAX;
+
+                        let mut sum = Vector3::new(0.0, 0.0, 0.0);
+
+                        for mp in program.motionpath.iter() {
+                            sum += mp.pos;
+
+                            let t = self.tmatrix * mp.pos.extend(1.0);
+
+                            minx = minx.min(t.x);
+                            miny = miny.min(t.y);
+
+                            maxx = maxx.max(t.x);
+                            maxy = maxy.max(t.y);
+                        }
+
+                        sum /= program.motionpath.len() as f32;
+
+                        if maxx - minx > 0.001 || maxy - miny > 0.001 {
+                            self.scale *= 1.0 / (maxx-minx).max(maxy-miny);
+                            self.center = sum;
+                        }
                     }
 
                     ui.same_line(ui.window_content_region_width() - 16.0);

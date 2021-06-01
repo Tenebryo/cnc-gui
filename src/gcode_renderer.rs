@@ -26,7 +26,7 @@ use vulkano::format::Format;
 pub mod line_fs {vulkano_shaders::shader!{ty: "fragment",path: "src/shaders/line.frag",               include: [],}}
 pub mod line_vs {vulkano_shaders::shader!{ty: "vertex",  path: "src/shaders/line.vert",               include: [],}}
 
-use crate::simulation::MotionPoint;
+use crate::simulation::{MotionPoint, MotionType};
 use crate::imgui_renderer::System;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -223,16 +223,22 @@ impl GCodeRenderer {
 
             let d = (p1.pos - p0.pos).normalize();
 
-            path.extend_from_slice(&[
+            let col = match p0.ty {
+                MotionType::Rapid  => {[1.0, 0.1, 0.0, 1.0]}
+                MotionType::Linear => {[0.0, 0.4, 1.0, 1.0]}
+            };
 
+            path.extend_from_slice(&[
                 Vertex {
                     pos : (p0.pos).into(),
-                    col : [0.2, 0.2, 0.2, 1.0],
+                    // col : [0.2, 0.2, 0.2, 1.0],
+                    col,
                     time : 0.0,
                 },
                 Vertex {
                     pos : (p1.pos).into(),
-                    col : [0.2, 0.2, 0.2, 1.0],
+                    // col : [0.2, 0.2, 0.2, 1.0],
+                    col,
                     time : 0.0,
                 },
             ]);
