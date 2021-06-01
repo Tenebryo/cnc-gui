@@ -211,8 +211,8 @@ impl UIState {
                         if i == j {
                             ui.same_line(ww - 80.0);
                             if ui.small_button(im_strf!("Disconnect##{}", p.port_name)) {
+                                core::mem::replace(&mut self.connection, None).unwrap().1.stop();
                                 println!("Disconnected {}", p.port_name);
-                                self.connection = None;
                             }
                         }
                     }
@@ -359,16 +359,28 @@ impl UIState {
                     false
                 });
 
+                ui.separator();
+
                 if let Some(ref ap) = self.active_program {
                     if let Some((_, ref conn)) = self.connection {
-                        if ui.small_button(im_str!("Validate Active Program")) {
+                        if ui.small_button(im_str!("Validate Program")) {
                             conn.validate_program(ap.clone());
                         }
-                        if ui.small_button(im_str!("Start Active Program")) {
+                        if ui.small_button(im_str!("Start Program")) {
                             conn.start_program(ap.clone());
                         }
-
-                        
+                        if conn.paused.load(Ordering::Relaxed) {
+                            if ui.small_button(im_str!("Pause Program")) {
+                                conn.pause_gcode();
+                            }
+                        } else {
+                            if ui.small_button(im_str!("Unpause Program")) {
+                                conn.unpause_gcode();
+                            }
+                        }
+                        if ui.small_button(im_str!("Stop Program")) {
+                            conn.stop_program();
+                        }
                     }
                 }
             });
@@ -405,10 +417,29 @@ impl UIState {
 
                 let [ww, wh] = ui.window_content_region_max();
 
+                let machine_status = self.connection.as_ref().map(|conn| conn.1.get_machine_status()).unwrap_or_default();
+
+
+                ui.text("Machine State");
+                ui.separator();
+
+                match machine_status.state {
+                    crate::grbl::GRBLState::Idle    => {}
+                    crate::grbl::GRBLState::Run     => {}
+                    crate::grbl::GRBLState::Hold(_) => {}
+                    crate::grbl::GRBLState::Jog     => {}
+                    crate::grbl::GRBLState::Alarm   => {}
+                    crate::grbl::GRBLState::Door(_) => {}
+                    crate::grbl::GRBLState::Check   => {}
+                    crate::grbl::GRBLState::Home    => {}
+                    crate::grbl::GRBLState::Sleep   => {}
+                }
+
+                ui.text(format!("{:?}", machine_status.state));
+
                 ui.text("Tool Position");
                 ui.separator();
 
-                let machine_status = self.connection.as_ref().map(|conn| conn.1.get_machine_status()).unwrap_or_default();
 
                 self.machine_coords = machine_status.machine_position;
                 for i in 0..3 {

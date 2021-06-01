@@ -79,25 +79,18 @@ impl GCodeTaskHandle {
         }
     }
 
-    pub fn stop_gcode(self) {
-
-        self.sender.send(GCodeTaskMessage::Stop).unwrap();
-
-        self.join.join().unwrap();
-    }
-
-    pub fn pause_gcode(self) {
+    pub fn pause_gcode(&self) {
 
         self.paused.store(true, Ordering::Relaxed);
-
-        self.join.join().unwrap();
     }
 
-    pub fn unpause_gcode(self) {
+    pub fn unpause_gcode(&self) {
 
         self.paused.store(false, Ordering::Relaxed);
+    }
 
-        self.join.join().unwrap();
+    pub fn stop(self) {
+        self.sender.send(GCodeTaskMessage::Stop).unwrap();
     }
 
     pub fn get_machine_status(&self) -> GRBLStatus {
