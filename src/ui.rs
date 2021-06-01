@@ -1,6 +1,7 @@
 
+use cgmath::*;
 use std::time::Instant;
-use crate::WindowRect;
+use crate::{WindowRect, gcode_renderer::GCodeRenderer};
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -11,15 +12,13 @@ use crate::grbl::GRBLConnection;
 
 use std::sync::atomic::AtomicBool;
 
-use rand::{Rng, thread_rng};
-
 use winit::window::Window;
 
 use crate::simulation::GcodeProgram;
 
 pub struct UIState {
     pub ports                       : Vec<SerialPortInfo>,
-    pub connection                  : Arc<Option<(usize, GRBLConnection)>>,
+    pub connection                  : Option<(usize, GRBLConnection)>,
     pub dialog_open                 : Arc<AtomicBool>,
     pub open_path                   : Arc<std::sync::Mutex<imgui::ImString>>,
     pub baud_rate_i                 : usize,
@@ -34,7 +33,9 @@ pub struct UIState {
     pub scale                       : f32,
     pub center                      : Vector3<f32>,
     pub orientation                 : Quaternion<f32>,
+    pub tmatrix                     : Matrix4<f32>,
     pub viewport_needs_update       : bool,
+    pub viewport_dims               : [f32; 2],
 }
 
 impl UIState {
@@ -43,7 +44,7 @@ impl UIState {
         let ports = serialport::available_ports().expect("No ports found!");
 
         // let mut connection : Option<(usize, usize)> = None;
-        let connection : Arc<Option<(usize, GRBLConnection)>> = Arc::new(None);
+        let connection : Option<(usize, GRBLConnection)> = None;
 
         let dialog_open = Arc::new(AtomicBool::new(false));
         let open_path = Arc::new(std::sync::Mutex::new(imgui::ImString::new(String::new())));
@@ -87,12 +88,14 @@ impl UIState {
             scale,
             center,
             orientation,
+            tmatrix : Matrix4::identity(),
             viewport_needs_update,
+            viewport_dims : [256.0, 256.0],
         }
     }
 
 
-    pub fn frame(&mut self, ui : &mut imgui::Ui, async_runtime : &mut tokio::runtime::Runtime, win : &Window) {
+    pub fn frame(&mut self, ui : &mut imgui::Ui, async_runtime : &mut tokio::runtime::Runtime, line_renderer : &mut GCodeRenderer, win : &Window) {
         use imgui::*;
         use imgui::im_str;
 
@@ -191,14 +194,14 @@ impl UIState {
 
                 ui.separator();
 
-                if let Some((j, _)) = *self.connection {
+                if let Some((j, _)) = self.connection {
                     for (i, p) in self.ports.iter().enumerate() {
                         ui.text(&format!("[{:2}] {:?}", i, p.port_name));
                         if i == j {
                             ui.same_line(ww - 80.0);
                             if ui.small_button(im_strf!("Disconnect##{}", p.port_name)) {
                                 println!("Disconnected {}", p.port_name);
-                                self.connection = Arc::new(None);
+                                self.connection = None;
                             }
                         }
                     }
@@ -208,7 +211,9 @@ impl UIState {
                         ui.same_line(ww - 80.0);
                         if ui.small_button(im_strf!("Connect##{}", p.port_name)) {
                             println!("Connected {}", p.port_name);
-                            self.connection = Arc::new(Some((i, GRBLConnection::open(&p.port_name).unwrap())));
+                            if let Ok(connection) = GRBLConnection::open(&p.port_name, self.baud_rate as u32) {
+                                self.connection = Some((i, connection));
+                            }
                         }
                     }
                 }
@@ -278,12 +283,18 @@ impl UIState {
 
                     if ui.small_button(&load_id) {
                         self.active_program = Some(program.clone());
+                        line_renderer.create_line_buffer(&self.active_program.as_ref().unwrap().motionpath);
                         self.viewport_needs_update = true;
                     }
 
                     ui.same_line(ui.window_content_region_width() - 16.0);
                     
                     if ui.small_button(&del_id) {
+
+                        if self.active_program.as_ref().map(|ap| ap.filepath == program.filepath).unwrap_or(false) {
+                            self.active_program = None;
+                        }
+
                         return true;
                     }
 
@@ -368,6 +379,8 @@ impl UIState {
                 let dim = ui.window_content_region_max();
                 let dims = ui.content_region_max();
 
+                self.viewport_dims = dims;
+
 
                 if ui.is_window_hovered() {
                     let io = ui.io();
@@ -394,15 +407,17 @@ impl UIState {
                     }
                 }
 
-                // if self.viewport_needs_update {
-                //     line_renderer.render(&system, renderer, dims[0] as u32, dims[1] as u32);
-                //     self.viewport_needs_update = false;
-                // }
+                self.tmatrix = 
+                    Matrix4::from_nonuniform_scale(1.0, dims[0] / dims[1], 1.0) * 
+                    Matrix4::from_translation(Vector3::new(0.0, 0.0, 0.5)) *
+                    Matrix4::from_nonuniform_scale(self.scale, self.scale, 0.0001) * 
+                    Matrix4::from(self.orientation) *
+                    Matrix4::from_translation(self.center);
                 
-                // if let Some(tid) = line_renderer.texture_id {
-                //     Image::new(tid, dim)
-                //         .build(ui);
-                // }
+                if let Some(tid) = line_renderer.texture_id {
+                    Image::new(tid, dim)
+                        .build(ui);
+                }
             });
 
         tok.pop(ui);

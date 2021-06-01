@@ -274,14 +274,14 @@ pub fn gcode_to_path_segments(nc : &str) -> Vec<MotionPoint> {
                 fn swizzle(v : Vector3<f32>, p : MotionPlane) -> Vector3<f32> {
                     match p {
                         MotionPlane::XY => v,
-                        MotionPlane::XZ => Vector3::new(v.x, v.z, v.y),
+                        MotionPlane::XZ => Vector3::new(v.z, v.x, v.y),
                         MotionPlane::YZ => Vector3::new(v.y, v.z, v.x),
                     }
                 }
                 fn unswizzle(v : Vector3<f32>, p : MotionPlane) -> Vector3<f32> {
                     match p {
                         MotionPlane::XY => v,
-                        MotionPlane::XZ => Vector3::new(v.x, v.z, v.y),
+                        MotionPlane::XZ => Vector3::new(v.y, v.z, v.x),
                         MotionPlane::YZ => Vector3::new(v.z, v.x, v.y),
                     }
                 }

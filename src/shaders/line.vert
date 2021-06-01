@@ -10,6 +10,7 @@ layout(location=2) in float time;
 
 layout(location=0) out vec4 f_color;
 layout(location=1) out float time_interp;
+layout(location=2) out vec2 center;
 
 // Built-in:
 // vec4 gl_Position
@@ -18,4 +19,5 @@ void main() {
   f_color = col;
   time_interp = time;
   gl_Position = matrix * vec4(pos.xyz, 1);
+  center = pos.xy;
 }

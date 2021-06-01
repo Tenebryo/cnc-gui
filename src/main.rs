@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![feature(drain_filter)]
+#![feature(drain_filter, array_windows)]
 
 #[macro_use]
 extern crate pest_derive;
@@ -60,6 +60,11 @@ fn main() {
 
     event_loop.run(move |event, _, control_flow| {
 
+        if ui_state.connection.is_some() {
+            let connection = ui_state.connection.as_mut().unwrap();
+            connection.1.poll();
+        }
+
         match event {
             Event::NewEvents(_) => {
                 // imgui.io_mut().update_delta_time(Instant::now());
@@ -84,11 +89,13 @@ fn main() {
 
                 if let Ok((mut cmd_buf_builder, swapchain_image, image_num)) = system.start_frame() {
 
+
                     let mut ui = system.imgui.frame();
 
-                    let mut run = true;
+                    let run = true;
 
-                    ui_state.frame(&mut ui, &mut async_runtime, system.surface.window());
+                    ui_state.frame(&mut ui, &mut async_runtime, &mut line_renderer, system.surface.window());
+
 
                     if !run {
                         *control_flow = ControlFlow::Exit;
@@ -97,6 +104,7 @@ fn main() {
                     system.platform.prepare_render(&ui, system.surface.window());
                     let draw_data = ui.render();
 
+
                     cmd_buf_builder.clear_color_image(swapchain_image.clone(), [0.0; 4].into())
                         .expect("Failed to create image clear command");
 
@@ -104,6 +112,15 @@ fn main() {
                         .draw_commands(&mut cmd_buf_builder, system.queue.clone(), swapchain_image.clone(), draw_data)
                         .expect("Rendering failed");
 
+                    if ui_state.viewport_needs_update {
+                        line_renderer.render(
+                            &mut system, 
+                            &mut cmd_buf_builder,
+                            ui_state.tmatrix,
+                            ui_state.viewport_dims[0] as u32, ui_state.viewport_dims[1] as u32
+                        );
+                        ui_state.viewport_needs_update = false;
+                    }
 
                     system.end_frame(cmd_buf_builder, image_num);
                 }

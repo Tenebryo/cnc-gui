@@ -1,71 +1,76 @@
 
 
-use std::{collections::VecDeque, pin::Pin, task::{Context, Poll}, time::Duration};
-
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
-use tokio_util::codec::{Decoder, Encoder, Framed};
-
+use std::time::Duration;
+use serialport::SerialPort;
+use std::collections::VecDeque;
 use pest::Parser;
-use bytes::BytesMut;
+
+// use std::{pin::Pin, task::{Context, Poll}, time::Duration};
+// use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+// use tokio_util::codec::{Decoder, Encoder, Framed};
+
+// use bytes::BytesMut;
 
 use super::*;
 
-struct GRBLCodec;
+// struct GRBLCodec;
 
-impl Encoder<GRBLCommand> for GRBLCodec {
-    type Error = tokio::io::Error;
+// impl Encoder<GRBLCommand> for GRBLCodec {
+//     type Error = tokio::io::Error;
 
-    fn encode(&mut self, item: GRBLCommand, dst: &mut BytesMut) -> Result<(), Self::Error> {
+//     fn encode(&mut self, item: GRBLCommand, dst: &mut BytesMut) -> Result<(), Self::Error> {
 
-        dst.extend(item.to_bytes().iter());
+//         dst.extend(item.to_bytes().iter());
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
 
-impl Decoder for GRBLCodec {
-    type Item = GRBLStatus;
-    type Error = Box<dyn std::error::Error>;
+// impl Decoder for GRBLCodec {
+//     type Item = GRBLStatus;
+//     type Error = Box<dyn std::error::Error>;
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+//     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         
-        Ok(None)
-    }
-}
+//         Ok(None)
+//     }
+// }
 
 
-struct AsyncSerialPort(Box<dyn serialport::SerialPort>);
+// struct AsyncSerialPort(Box<dyn serialport::SerialPort>);
 
-impl AsyncRead for AsyncSerialPort {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<tokio::io::Result<()>> {
-        let mut rbuf = [0; 1024];
-        let n = self.0.read(&mut rbuf)?;
-        buf.initialize_unfilled_to(n).copy_from_slice(&rbuf[..n]);
+// impl AsyncRead for AsyncSerialPort {
+//     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<tokio::io::Result<()>> {
+//         let mut rbuf = [0; 1024];
+//         let n = self.0.read(&mut rbuf)?;
+//         buf.initialize_unfilled_to(n).copy_from_slice(&rbuf[..n]);
 
-        Poll::Ready(Ok(()))
-    }
-}
+//         Poll::Ready(Ok(()))
+//     }
+// }
 
-impl AsyncWrite for AsyncSerialPort {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, tokio::io::Error>> {
+// impl AsyncWrite for AsyncSerialPort {
+//     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, tokio::io::Error>> {
 
-        Poll::Ready(self.0.write(buf).into())
-    }
+//         Poll::Ready(self.0.write(buf).into())
+//     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
-        Poll::Ready(Ok(()))
-    }
+//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
-        Poll::Ready(Ok(()))
-    }
-}
+//     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
+// }
+
+use std::sync::Arc;
+use std::sync::Mutex;
 
 
 pub struct GRBLConnection {
-    io : Framed<AsyncSerialPort, GRBLCodec>,
-    gcode : Option<(usize, usize, Vec<u8>)>,
+    port : Arc<Mutex<Box<dyn SerialPort>>>,
     command_queue : VecDeque<GRBLCommand>,
     send_line : bool,
     machine_status : GRBLStatus,
@@ -76,16 +81,17 @@ pub struct GRBLConnection {
 use std::error::Error;
 
 impl GRBLConnection {
-    pub fn open(path : &str) -> Result<Self, Box<dyn Error>> {
-        let mut port = serialport::new(path, 115_200)
-            .timeout(Duration::from_millis(10))
-            .open().expect("Failed to open port");
+    pub fn open(path : &str, baud_rate : u32) -> Result<Self, Box<dyn Error>> {
 
+        let port = serialport::new(path, baud_rate)
+            .timeout(Duration::from_millis(500))
+            .open()?;
+
+        let port = Arc::new(Mutex::new(port));
 
         Ok(Self {
-            io : GRBLCodec.framed(AsyncSerialPort(port)),
+            port,
             command_queue : VecDeque::new(),
-            gcode : None,
             send_line : false,
             machine_status : GRBLStatus::default(),
             alarm : None,
@@ -95,6 +101,20 @@ impl GRBLConnection {
 
     pub fn queue_command(&mut self, command : GRBLCommand) {
         self.command_queue.push_back(command);
+    }
+
+    pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
+
+        let mut buf = [0;1024];
+        let n = self.port.lock().unwrap().read(&mut buf)?;
+
+        println!("Received: {}", String::from_utf8(buf[..n].to_vec()).unwrap());
+
+        Ok(())
+    }
+
+    pub fn execute_realtime_command(&mut self, command : GRBLRealtimeCommand) {
+        self.port.lock().unwrap().write(&[command as u8]).unwrap();
     }
 
     pub fn handle_message(&mut self, offset : usize) -> Option<usize> {
