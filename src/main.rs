@@ -4,14 +4,6 @@
 #[macro_use]
 extern crate pest_derive;
 
-use imgui_renderer::System;
-use vulkano::command_buffer::AutoCommandBufferBuilder;
-
-use vulkano::swapchain;
-use vulkano::swapchain::AcquireError;
-use vulkano::sync;
-use vulkano::sync::{FlushError, GpuFuture};
-
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
@@ -75,16 +67,6 @@ fn main() {
                 system.surface.window().request_redraw();
             }
             Event::RedrawRequested(_) => {
-                
-                // let t = Instant::now();
-                // let since_last = t.duration_since(last_redraw);
-                // last_redraw = t;
-
-                // if since_last > target_frame_time {
-                //     if since_last < target_frame_time {
-                //         std::thread::sleep(target_frame_time - since_last);
-                //     }
-                // }
 
                 if let Ok((mut cmd_buf_builder, swapchain_image, image_num)) = system.start_frame() {
 

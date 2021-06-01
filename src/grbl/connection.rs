@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 use pest::Parser;
-use serialport::{ErrorKind, SerialPort};
+use serialport::SerialPort;
 
 use super::*;
 

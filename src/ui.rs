@@ -1,7 +1,7 @@
 
 use cgmath::*;
 use imgui::ImString;
-use std::{sync::Mutex, time::Instant};
+use std::time::Instant;
 use crate::{WindowRect, gcode_renderer::GCodeRenderer, grbl::{GCodeTaskHandle, start_gcode_sender_task}};
 use std::sync::Arc;
 use std::path::PathBuf;
@@ -9,7 +9,6 @@ use std::sync::atomic::Ordering;
 
 use cgmath::{InnerSpace, Quaternion, Rad, Rotation3, Rotation, Vector2, Vector3};
 use serialport::SerialPortInfo;
-use crate::grbl::GRBLConnection;
 
 use std::sync::atomic::AtomicBool;
 
