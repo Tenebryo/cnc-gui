@@ -408,10 +408,20 @@ impl UIState {
                 ui.text("Tool Position");
                 ui.separator();
 
-                ui.input_float3(im_str!("Machine Coords"), &mut self.machine_coords)
-                    .build();
-                ui.input_float3(im_str!("Work Coords"), &mut self.machine_coords)
-                    .build();
+                let machine_status = self.connection.as_ref().map(|conn| conn.1.get_machine_status()).unwrap_or_default();
+
+                self.machine_coords = machine_status.machine_position;
+                for i in 0..3 {
+                    self.work_coords[i] = machine_status.machine_position[i] + machine_status.work_offset[i];
+                }
+
+                if ui.input_float3(im_str!("Machine Coords"), &mut self.machine_coords).build() {
+                    //set machine offset
+                }
+
+                if ui.input_float3(im_str!("Work Coords"), &mut self.work_coords).build() {
+                    //set work offset
+                }
 
 
                 ui.separator();
@@ -422,6 +432,10 @@ impl UIState {
                     .range(7200..=24000)
                     .build(ui, &mut self.spindle_rpm_setpoint);
 
+
+                let prev_spindle_on = machine_status.spindle_cw || machine_status.spindle_ccw;
+                self.spindle_on = prev_spindle_on;
+
                 self.spindle_rpm_setpoint = (self.spindle_rpm_setpoint as f32 / 100.0).round() as i32 * 100;
 
                 let tok = ui.push_style_colors(&[
@@ -429,7 +443,10 @@ impl UIState {
                     (StyleColor::ButtonActive,  if self.spindle_on {[0.0, 0.1, 0.0, 1.0]} else {[0.0, 0.75, 0.0, 1.0]}),
                     (StyleColor::ButtonHovered, if self.spindle_on {[0.0, 0.1, 0.0, 1.0]} else {[0.0, 1.0, 0.0, 1.0]})
                 ]);
+
+
                 self.spindle_on |= ui.button(im_str!("On"), [ww / 2.0 - 10.0, 24.0]);
+
                 tok.pop(ui);
 
                 ui.same_line(ww / 2.0 + 10.0);
@@ -440,6 +457,11 @@ impl UIState {
                     (StyleColor::ButtonHovered, if self.spindle_on {[1.0, 0.0, 0.0, 1.0]} else {[0.1, 0.0, 0.0, 1.0]})
                 ]);
                 self.spindle_on &= !ui.button(im_str!("Off"), [ww / 2.0 - 10.0, 24.0]);
+
+                if self.spindle_on != prev_spindle_on {
+                    // send message to change spindle state
+                }
+
                 tok.pop(ui);    
 
                 ui.separator();

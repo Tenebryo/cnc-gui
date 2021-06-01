@@ -40,7 +40,7 @@ inputs = @{ "Pn:" ~ ("X"|"Y"|"Z"|"P"|"D"|"H"|"R"|"S")+ }
 
 overrides = ${ "Ov:" ~ float ~ "," ~ float ~ "," ~ float}
 
-accessories = @{ "Pn:" ~ ("S"|"C"|"F"|"M")+ }
+accessories = @{ "A:" ~ ("S"|"C"|"F"|"M")+ }
 
 status_item = _{(mstate | mpos | wpos | wco | buffer_state | line_number | feed | feed_and_speed | inputs | overrides | accessories)}
 

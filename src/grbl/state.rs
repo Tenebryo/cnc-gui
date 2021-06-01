@@ -32,6 +32,10 @@ pub struct GRBLStatus {
     pub override_feed : u32,
     pub override_speed : u32,
     pub override_rapid : u32,
+    pub spindle_cw : bool,
+    pub spindle_ccw : bool,
+    pub flood_coolant : bool,
+    pub mist_coolant : bool,
 }
 
 

@@ -103,9 +103,9 @@ impl GRBLConnection {
 
                 let consumed = msg.as_span().end();
 
-                // if msg.as_rule() != Rule::unrecognized_message {
-                //     println!("processed message: {:?}: {:?}", msg.as_rule(), msg.as_str());
-                // }
+                if msg.as_rule() == Rule::unrecognized_message && msg.as_str() != "\r\n" {
+                    println!("processed message: {:?}: {:?}", msg.as_rule(), msg.as_str());
+                }
 
                 match msg.as_rule() {
                     Rule::response_message => {
@@ -123,6 +123,7 @@ impl GRBLConnection {
                         let msg = msg.into_inner().next()?;
                         match msg.as_rule() {
                             Rule::status_message => {
+                                let msg_str = msg.as_str();
                                 for item in msg.into_inner() {
                                     match item.as_rule() {
                                         Rule::mstate       => {
@@ -206,7 +207,23 @@ impl GRBLConnection {
                                             self.machine_status.override_rapid = r;
                                             self.machine_status.override_speed = s;
                                         }
-                                        Rule::accessories  => {}
+                                        Rule::accessories  => {
+
+                                            self.machine_status.spindle_cw = false;
+                                            self.machine_status.spindle_ccw = false;
+                                            self.machine_status.flood_coolant = false;
+                                            self.machine_status.mist_coolant = false;
+
+                                            for acc in msg_str.chars().skip(2) {
+                                                match acc {
+                                                    'S' => {self.machine_status.spindle_cw = true;}
+                                                    'C' => {self.machine_status.spindle_ccw = true;}
+                                                    'F' => {self.machine_status.flood_coolant = true;}
+                                                    'M' => {self.machine_status.mist_coolant = true;}
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
                                         _ => unreachable!()
                                     }
                                 }
