@@ -33,6 +33,7 @@ mod gcode;
 mod gcode_renderer;
 mod ui;
 mod clipboard;
+mod rendering;
 
 struct WindowRect {
     pos : [f32; 2],

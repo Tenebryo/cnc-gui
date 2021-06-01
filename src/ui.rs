@@ -292,6 +292,7 @@ impl UIState {
                     if ui.small_button(&del_id) {
 
                         if self.active_program.as_ref().map(|ap| ap.filepath == program.filepath).unwrap_or(false) {
+                            line_renderer.clear_line_buffer();
                             self.active_program = None;
                         }
 
@@ -400,7 +401,7 @@ impl UIState {
                     if io.mouse_down[1] {
                         let axis = Vector3::new(-mouse_delta[1], mouse_delta[0], 0.0);
                         let angle = axis.magnitude() * 0.001;
-                        self.orientation = (Quaternion::from_axis_angle(axis, Rad(angle)) * self.orientation).normalize();
+                        self.orientation = (Quaternion::from_axis_angle(axis, Rad(-angle)) * self.orientation).normalize();
                         if Vector2::from(mouse_delta).magnitude() < 1.0 {
                             self.viewport_needs_update = true;
                         }

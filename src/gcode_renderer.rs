@@ -1,9 +1,8 @@
 use cgmath::*;
 use imgui::TextureId;
 
-use vulkano::{buffer::cpu_pool::CpuBufferPoolChunk, memory::pool::StdMemoryPool, sampler::Sampler};
+use vulkano::{buffer::cpu_pool::CpuBufferPoolChunk, format::ClearValue, memory::pool::StdMemoryPool, sampler::Sampler};
 use vulkano::pipeline::viewport::Viewport;
-use vulkano::buffer::CpuAccessibleBuffer;
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::command_buffer::DynamicState;
 use vulkano::buffer::CpuBufferPool;
@@ -27,7 +26,8 @@ use vulkano::format::Format;
 pub mod line_fs {vulkano_shaders::shader!{ty: "fragment",path: "src/shaders/line.frag",               include: [],}}
 pub mod line_vs {vulkano_shaders::shader!{ty: "vertex",  path: "src/shaders/line.vert",               include: [],}}
 
-use crate::{imgui_renderer::{System}, simulation::MotionPoint};
+use crate::simulation::MotionPoint;
+use crate::imgui_renderer::System;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Vertex{
@@ -56,10 +56,16 @@ impl GCodeRenderer {
                         load: Clear,
                         store: DontCare,
                         format: Format::D16Unorm,
-                        samples: 1,
+                        samples: 4,
+                    },
+                    msaa: {
+                        load: Clear,
+                        store: DontCare,
+                        format: Format::R8G8B8A8Unorm,
+                        samples: 4,
                     },
                     color: {
-                        load: Clear,
+                        load: DontCare,
                         store: Store,
                         format: Format::R8G8B8A8Unorm,
                         samples: 1,
@@ -67,9 +73,10 @@ impl GCodeRenderer {
                 },
                 passes: [
                     {
-                        color: [color],
+                        color: [msaa],
                         depth_stencil: {depth},
-                        input: []
+                        input : [],
+                        resolve:[color]
                     }
                 ]
             )
@@ -89,8 +96,10 @@ impl GCodeRenderer {
                 .vertex_shader(line_vs.main_entry_point(), ())
                 .primitive_topology(PrimitiveTopology::LineList)
                 .viewports_dynamic_scissors_irrelevant(1)
-                .depth_stencil_simple_depth()
+                // .depth_stencil_simple_depth()
+                .depth_write(true)
                 .line_width_dynamic()
+                .blend_alpha_blending()
                 .fragment_shader(line_fs.main_entry_point(), ())
                 .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
                 .build(system.device.clone())
@@ -140,15 +149,31 @@ impl GCodeRenderer {
 
         if let Some(ref mut image) = self.image {
 
-            let depth_buffer = AttachmentImage::transient_input_attachment(
+            // let depth_buffer = AttachmentImage::transient_input_attachment(
+            //     system.device.clone(), 
+            //     [width, height], 
+            //     Format::D16Unorm
+            // ).unwrap();
+
+            let depth_buffer = AttachmentImage::transient_multisampled_input_attachment(
                 system.device.clone(), 
-                [width, height], 
+                [width, height],
+                4,
                 Format::D16Unorm
+            ).unwrap();
+
+
+            let msaa_buffer = AttachmentImage::transient_multisampled_input_attachment(
+                system.device.clone(), 
+                [width, height],
+                4,
+                Format::R8G8B8A8Unorm
             ).unwrap();
 
             let framebuffer = Arc::new(
                 Framebuffer::start(self.render_pass.clone())
                     .add(depth_buffer.clone()).unwrap()
+                    .add(msaa_buffer.clone()).unwrap()
                     .add(image.clone()).unwrap()
                     .build().unwrap()
             );
@@ -156,7 +181,8 @@ impl GCodeRenderer {
             cmd_buf_builder.begin_render_pass(
                 framebuffer, 
                 SubpassContents::Inline, 
-                vec![1.0.into(), [0.9, 0.9, 0.9, 1.0].into()]
+                // vec![1.0.into(), [0.0, 0.0, 0.0, 1.0].into()]
+                vec![1.0.into(), [0.9, 0.9, 0.9, 1.0].into(), ClearValue::None]
             ).expect("failed to start render pass");
 
 
@@ -174,9 +200,11 @@ impl GCodeRenderer {
 
                 cmd_buf_builder.draw(
                     self.pipeline.clone(), &ds, vec![vb.clone()], (), 
-                    line_vs::ty::PushConstants {
-                        matrix : tmatrix.into(),
-                    })
+                        line_vs::ty::PushConstants {
+                            matrix : tmatrix.into(),
+                            viewport : [width as f32, height as f32],
+                        }
+                    )
                     .expect("failed to draw line");
             }
 
@@ -191,15 +219,20 @@ impl GCodeRenderer {
         let mut path = Vec::with_capacity(motion_path.len() * 2 - 2);
 
         for [p0, p1] in motion_path.array_windows::<2>() {
+
+
+            let d = (p1.pos - p0.pos).normalize();
+
             path.extend_from_slice(&[
+
                 Vertex {
-                    pos : p0.pos.into(),
-                    col : [0.0, 0.0, 1.0, 1.0],
+                    pos : (p0.pos).into(),
+                    col : [0.2, 0.2, 0.2, 1.0],
                     time : 0.0,
                 },
                 Vertex {
-                    pos : p1.pos.into(),
-                    col : [0.0, 0.0, 1.0, 1.0],
+                    pos : (p1.pos).into(),
+                    col : [0.2, 0.2, 0.2, 1.0],
                     time : 0.0,
                 },
             ]);
@@ -213,7 +246,7 @@ impl GCodeRenderer {
 
     }
 
-    pub fn clear_line_buffer(&mut self, motion_path : &[MotionPoint]) {
+    pub fn clear_line_buffer(&mut self) {
 
         self.vertex_buffer = None;        
     }
