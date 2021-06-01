@@ -3,7 +3,7 @@ use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
 
 
-use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer};
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::image::{ImageUsage, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
@@ -106,23 +106,20 @@ pub fn init(title: &str, event_loop : &EventLoop<()>) -> System {
             ..ImageUsage::color_attachment()
         };
 
-        Swapchain::new(
-            device.clone(),
-            surface.clone(),
-            caps.min_image_count,
-            format,
-            dimensions,
-            1,
-            image_usage,
-            &queue,
-            SurfaceTransform::Identity,
-            alpha,
-            PresentMode::Fifo,
-            FullscreenExclusive::Default,
-            true,
-            ColorSpace::SrgbNonLinear,
-        )
-        .unwrap()
+        Swapchain::start(device.clone(), surface.clone())
+            .num_images(caps.min_image_count)
+            .format(format)
+            .dimensions(dimensions)
+            .layers(1)
+            .usage(image_usage)
+            .transform(SurfaceTransform::Identity)
+            .composite_alpha(alpha)
+            .present_mode(PresentMode::Fifo)
+            .fullscreen_exclusive(FullscreenExclusive::Default)
+            .clipped(true)
+            .color_space(ColorSpace::SrgbNonLinear)
+            .build()
+            .expect("Failed to create swapchain")
     };
 
     let mut imgui = Context::create();
@@ -180,7 +177,7 @@ pub fn init(title: &str, event_loop : &EventLoop<()>) -> System {
 }
 
 impl System {
-    pub fn start_frame(&mut self) -> Result<(AutoCommandBufferBuilder, Arc<SwapchainImage<Window>>, usize),()> {
+    pub fn start_frame(&mut self) -> Result<(AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, Arc<SwapchainImage<Window>>, usize),()> {
 
             
         self.previous_frame_end.as_mut().unwrap().cleanup_finished();
@@ -188,7 +185,7 @@ impl System {
         if self.recreate_swapchain {
             let dimensions: [u32; 2] = self.surface.window().inner_size().into();
             let (new_swapchain, new_images) =
-                match self.swapchain.recreate_with_dimensions(dimensions) {
+                match self.swapchain.recreate().dimensions(dimensions).build() {
                     Ok(r) => r,
                     Err(SwapchainCreationError::UnsupportedDimensions) => return Err(()),
                     Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
@@ -217,14 +214,14 @@ impl System {
         self.acquire_future = Some(Box::new(acquire_future));
 
 
-        let cmd_buf_builder = AutoCommandBufferBuilder::new(self.device.clone(), self.queue.family())
+        let cmd_buf_builder = AutoCommandBufferBuilder::primary(self.device.clone(), self.queue.family(), CommandBufferUsage::OneTimeSubmit)
             .expect("Failed to create command buffer");
 
 
         Ok((cmd_buf_builder, self.images[image_num].clone(), image_num))
     }
 
-    pub fn end_frame(&mut self, cmd_buf_builder : AutoCommandBufferBuilder, image_num : usize) {
+    pub fn end_frame(&mut self, cmd_buf_builder : AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, image_num : usize) {
 
         let cmd_buf = cmd_buf_builder.build()
             .expect("Failed to build command buffer");

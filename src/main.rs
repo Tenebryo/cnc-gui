@@ -4,6 +4,7 @@
 #[macro_use]
 extern crate pest_derive;
 
+use vulkano::image::view::ImageView;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::ControlFlow;
 
@@ -90,7 +91,7 @@ fn main() {
                         .expect("Failed to create image clear command");
 
                     system.renderer
-                        .draw_commands(&mut cmd_buf_builder, system.queue.clone(), swapchain_image.clone(), draw_data)
+                        .draw_commands(&mut cmd_buf_builder, system.queue.clone(), ImageView::new(swapchain_image.clone()).unwrap(), draw_data)
                         .expect("Rendering failed");
 
                     if ui_state.viewport_needs_update {

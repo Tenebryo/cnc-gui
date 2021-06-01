@@ -1,25 +1,24 @@
 use cgmath::*;
 use imgui::TextureId;
 
-use vulkano::{buffer::cpu_pool::CpuBufferPoolChunk, format::ClearValue, memory::pool::StdMemoryPool, sampler::Sampler};
+use vulkano::{buffer::cpu_pool::CpuBufferPoolChunk, command_buffer::PrimaryAutoCommandBuffer, format::ClearValue, image::{ImageCreateFlags, view::ImageView}, memory::pool::StdMemoryPool, sampler::Sampler};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::command_buffer::DynamicState;
 use vulkano::buffer::CpuBufferPool;
 use vulkano::buffer::BufferUsage;
 use vulkano::image::AttachmentImage;
-use vulkano::framebuffer::Framebuffer;
-use vulkano::image::Dimensions;
+use vulkano::render_pass::Framebuffer;
+use vulkano::image::ImageDimensions;
 use vulkano::command_buffer::SubpassContents;
 use vulkano::image::ImageUsage;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::{image::StorageImage, pipeline::GraphicsPipeline};
-use vulkano::framebuffer::Subpass;
+use vulkano::render_pass::Subpass;
+use vulkano::render_pass::RenderPass;
 use std::sync::Arc;
 
 use vulkano::{impl_vertex, pipeline::GraphicsPipelineAbstract};
-
-use vulkano::framebuffer::RenderPassAbstract;
 
 use vulkano::format::Format;
 
@@ -40,8 +39,8 @@ impl_vertex!(Vertex, pos, col, time);
 
 pub struct GCodeRenderer {
     pub pipeline : Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    pub render_pass : Arc<dyn RenderPassAbstract + Send + Sync>,
-    pub image : Option<Arc<StorageImage<Format>>>,
+    pub render_pass : Arc<RenderPass>,
+    pub image : Option<Arc<StorageImage>>,
     pub vertex_pool : CpuBufferPool<Vertex>,
     pub vertex_buffer : Option<Arc<CpuBufferPoolChunk<Vertex, Arc<StdMemoryPool>>>>,
     pub texture_id : Option<TextureId>,
@@ -118,28 +117,29 @@ impl GCodeRenderer {
         }
     }
 
-    pub fn render(&mut self, system : &mut System, cmd_buf_builder : &mut AutoCommandBufferBuilder, tmatrix : Matrix4<f32>, width : u32, height : u32) {
+    pub fn render(&mut self, system : &mut System, cmd_buf_builder : &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, tmatrix : Matrix4<f32>, width : u32, height : u32) {
 
-        if self.image.as_ref().map(|i| i.dimensions() != Dimensions::Dim2d{width,height}).unwrap_or(true) {
+        if self.image.as_ref().map(|i| i.dimensions() != ImageDimensions::Dim2d{width,height,array_layers:1}).unwrap_or(true) {
             let image =
                 StorageImage::with_usage(
                     system.device.clone(), 
-                    vulkano::image::Dimensions::Dim2d{width, height}, 
+                    ImageDimensions::Dim2d{width, height, array_layers:1},
                     Format::R8G8B8A8Unorm, 
                     ImageUsage{
                         sampled : true,
                         ..ImageUsage::color_attachment()
                     }, 
+                    ImageCreateFlags::default(),
                     vec![system.queue.family()]
                 ).expect("Failed to create viewport storage image");
 
             if self.texture_id == None {
 
-                let texture_id = system.renderer.textures().insert((image.clone(), Sampler::simple_repeat_linear(system.device.clone())));
+                let texture_id = system.renderer.textures().insert((ImageView::new(image.clone()).unwrap(), Sampler::simple_repeat_linear(system.device.clone())));
                 self.texture_id = Some(texture_id);
             } else {
 
-                system.renderer.textures().replace(self.texture_id.unwrap(), (image.clone(), Sampler::simple_repeat_linear(system.device.clone())));
+                system.renderer.textures().replace(self.texture_id.unwrap(), (ImageView::new(image.clone()).unwrap(), Sampler::simple_repeat_linear(system.device.clone())));
             }
 
             self.image = Some(image);
@@ -172,9 +172,9 @@ impl GCodeRenderer {
 
             let framebuffer = Arc::new(
                 Framebuffer::start(self.render_pass.clone())
-                    .add(depth_buffer.clone()).unwrap()
-                    .add(msaa_buffer.clone()).unwrap()
-                    .add(image.clone()).unwrap()
+                    .add(ImageView::new(depth_buffer.clone()).unwrap()).unwrap()
+                    .add(ImageView::new(msaa_buffer.clone()).unwrap()).unwrap()
+                    .add(ImageView::new(image.clone()).unwrap()).unwrap()
                     .build().unwrap()
             );
 
@@ -203,7 +203,8 @@ impl GCodeRenderer {
                         line_vs::ty::PushConstants {
                             matrix : tmatrix.into(),
                             viewport : [width as f32, height as f32],
-                        }
+                        },
+                        vec![]
                     )
                     .expect("failed to draw line");
             }
