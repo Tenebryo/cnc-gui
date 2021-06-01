@@ -98,7 +98,7 @@ impl UIState {
     }
 
 
-    pub fn frame(&mut self, ui : &mut imgui::Ui, async_runtime : &mut tokio::runtime::Runtime, line_renderer : &mut GCodeRenderer, win : &Window) {
+    pub fn frame(&mut self, ui : &mut imgui::Ui, async_runtime : &mut tokio::runtime::Runtime, viewport : &crate::viewport::Viewport, line_renderer : &mut GCodeRenderer, win : &Window) {
 
         use imgui::*;
         use imgui::im_str;
@@ -514,7 +514,7 @@ impl UIState {
                     Matrix4::from(self.orientation) *
                     Matrix4::from_translation(self.center);
                 
-                if let Some(tid) = line_renderer.texture_id {
+                if let Some(tid) = viewport.texture_id {
                     Image::new(tid, dim)
                         .build(ui);
                 }

@@ -51,6 +51,8 @@ fn main() {
 
     let mut ui_state = UIState::init();
 
+    let mut viewport = viewport::Viewport::new();
+
 
     event_loop.run(move |event, _, control_flow| {
 
@@ -76,7 +78,7 @@ fn main() {
 
                     let run = true;
 
-                    ui_state.frame(&mut ui, &mut async_runtime, &mut line_renderer, system.surface.window());
+                    ui_state.frame(&mut ui, &mut async_runtime, &viewport, &mut line_renderer, system.surface.window());
 
 
                     if !run {
@@ -94,9 +96,12 @@ fn main() {
                         .draw_commands(&mut cmd_buf_builder, system.queue.clone(), ImageView::new(swapchain_image.clone()).unwrap(), draw_data)
                         .expect("Rendering failed");
 
+                    viewport.update(&mut system, ui_state.viewport_dims[0] as u32, ui_state.viewport_dims[1] as u32);
+
                     if ui_state.viewport_needs_update {
                         line_renderer.render(
-                            &mut system, 
+                            &mut system,
+                            &viewport,
                             &mut cmd_buf_builder,
                             ui_state.tmatrix,
                             ui_state.viewport_dims[0] as u32, ui_state.viewport_dims[1] as u32

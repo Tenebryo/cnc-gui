@@ -1,17 +1,13 @@
 use cgmath::*;
+use image::flat::View;
 use imgui::TextureId;
 
-use vulkano::{buffer::cpu_pool::CpuBufferPoolChunk, command_buffer::PrimaryAutoCommandBuffer, format::ClearValue, image::{ImageCreateFlags, view::ImageView}, memory::pool::StdMemoryPool, sampler::Sampler};
-use vulkano::pipeline::viewport::Viewport;
+use vulkano::{buffer::{cpu_pool::CpuBufferPoolChunk, view}, command_buffer::PrimaryAutoCommandBuffer, format::ClearValue, image::{ImageCreateFlags, view::ImageView}, memory::pool::StdMemoryPool, sampler::Sampler};
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::command_buffer::DynamicState;
 use vulkano::buffer::CpuBufferPool;
 use vulkano::buffer::BufferUsage;
-use vulkano::image::AttachmentImage;
-use vulkano::render_pass::Framebuffer;
-use vulkano::image::ImageDimensions;
 use vulkano::command_buffer::SubpassContents;
-use vulkano::image::ImageUsage;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::{image::StorageImage, pipeline::GraphicsPipeline};
 use vulkano::render_pass::Subpass;
@@ -21,6 +17,7 @@ use std::sync::Arc;
 use vulkano::{impl_vertex, pipeline::GraphicsPipelineAbstract};
 
 use vulkano::format::Format;
+use crate::viewport::Viewport;
 
 pub mod line_fs {vulkano_shaders::shader!{ty: "fragment",path: "src/shaders/line.frag",               include: [],}}
 pub mod line_vs {vulkano_shaders::shader!{ty: "vertex",  path: "src/shaders/line.vert",               include: [],}}
@@ -117,66 +114,11 @@ impl GCodeRenderer {
         }
     }
 
-    pub fn render(&mut self, system : &mut System, cmd_buf_builder : &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, tmatrix : Matrix4<f32>, width : u32, height : u32) {
+    pub fn render(&mut self, system : &mut System, viewport : &Viewport, cmd_buf_builder : &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, tmatrix : Matrix4<f32>, width : u32, height : u32) {
 
-        if self.image.as_ref().map(|i| i.dimensions() != ImageDimensions::Dim2d{width,height,array_layers:1}).unwrap_or(true) {
-            let image =
-                StorageImage::with_usage(
-                    system.device.clone(), 
-                    ImageDimensions::Dim2d{width, height, array_layers:1},
-                    Format::R8G8B8A8Unorm, 
-                    ImageUsage{
-                        sampled : true,
-                        ..ImageUsage::color_attachment()
-                    }, 
-                    ImageCreateFlags::default(),
-                    vec![system.queue.family()]
-                ).expect("Failed to create viewport storage image");
+        let framebuffer = viewport.create_framebuffer(self.render_pass.clone());
 
-            if self.texture_id == None {
-
-                let texture_id = system.renderer.textures().insert((ImageView::new(image.clone()).unwrap(), Sampler::simple_repeat_linear(system.device.clone())));
-                self.texture_id = Some(texture_id);
-            } else {
-
-                system.renderer.textures().replace(self.texture_id.unwrap(), (ImageView::new(image.clone()).unwrap(), Sampler::simple_repeat_linear(system.device.clone())));
-            }
-
-            self.image = Some(image);
-
-            println!("recreated viewport buffer")
-        };
-
-        if let Some(ref mut image) = self.image {
-
-            // let depth_buffer = AttachmentImage::transient_input_attachment(
-            //     system.device.clone(), 
-            //     [width, height], 
-            //     Format::D16Unorm
-            // ).unwrap();
-
-            let depth_buffer = AttachmentImage::transient_multisampled_input_attachment(
-                system.device.clone(), 
-                [width, height],
-                4,
-                Format::D16Unorm
-            ).unwrap();
-
-
-            let msaa_buffer = AttachmentImage::transient_multisampled_input_attachment(
-                system.device.clone(), 
-                [width, height],
-                4,
-                Format::R8G8B8A8Unorm
-            ).unwrap();
-
-            let framebuffer = Arc::new(
-                Framebuffer::start(self.render_pass.clone())
-                    .add(ImageView::new(depth_buffer.clone()).unwrap()).unwrap()
-                    .add(ImageView::new(msaa_buffer.clone()).unwrap()).unwrap()
-                    .add(ImageView::new(image.clone()).unwrap()).unwrap()
-                    .build().unwrap()
-            );
+        if let Some(framebuffer) = framebuffer {
 
             cmd_buf_builder.begin_render_pass(
                 framebuffer, 
@@ -189,7 +131,7 @@ impl GCodeRenderer {
             if let Some(ref vb) = self.vertex_buffer {
 
                 let ds = DynamicState {
-                    viewports : Some(vec![Viewport {
+                    viewports : Some(vec![vulkano::pipeline::viewport::Viewport {
                         origin : [0.0; 2],
                         dimensions : [width as f32, height as f32],
                         depth_range : 0.0..1.0,
