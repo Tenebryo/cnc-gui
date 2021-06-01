@@ -67,9 +67,35 @@ impl GCodeTaskHandle {
         }
     }
 
-    pub fn stop_task(self) {
+    pub fn send_string(&self, mut cmd : String) -> bool {
+        if !self.has_gcode.load(Ordering::SeqCst) {
+
+            cmd += "\r\n";
+
+            self.sender.send(GCodeTaskMessage::SendString(cmd)).unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn stop_gcode(self) {
 
         self.sender.send(GCodeTaskMessage::Stop).unwrap();
+
+        self.join.join().unwrap();
+    }
+
+    pub fn pause_gcode(self) {
+
+        self.paused.store(true, Ordering::Relaxed);
+
+        self.join.join().unwrap();
+    }
+
+    pub fn unpause_gcode(self) {
+
+        self.paused.store(false, Ordering::Relaxed);
 
         self.join.join().unwrap();
     }
@@ -81,6 +107,7 @@ pub enum GCodeTaskMessage {
     StopProgram,
     RealtimeCommand(GRBLRealtimeCommand),
     SendCommand(GRBLCommand),
+    SendString(String),
     Stop,
 }
 
@@ -108,6 +135,10 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
             let mut last_status = Instant::now();
 
             loop {
+
+                if gcode_iter.is_none() {
+                    gcode_line.store(0, Ordering::Relaxed);
+                }
 
                 if last_status.elapsed() > Duration::from_millis(500) {
 
@@ -152,6 +183,11 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                         }
                         GCodeTaskMessage::Stop => {
                             return;
+                        }
+                        GCodeTaskMessage::SendString(s) => {
+                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
+                                grbl.send_message(s).unwrap();
+                            }
                         }
                     }
                 }

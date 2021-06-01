@@ -1,5 +1,6 @@
 
 use cgmath::*;
+use imgui::ImString;
 use std::{sync::Mutex, time::Instant};
 use crate::{WindowRect, gcode_renderer::GCodeRenderer, grbl::{GCodeTaskHandle, start_gcode_sender_task}};
 use std::sync::Arc;
@@ -36,6 +37,7 @@ pub struct UIState {
     pub tmatrix                     : Matrix4<f32>,
     pub viewport_needs_update       : bool,
     pub viewport_dims               : [f32; 2],
+    pub command_input               : ImString,
 }
 
 impl UIState {
@@ -70,6 +72,7 @@ impl UIState {
         let orientation = Quaternion::from_arc(Vector3::unit_z(), Vector3::unit_z(), None);
         let viewport_needs_update = true;
 
+        let command_input = ImString::from(String::new());
 
         UIState {
             ports,
@@ -91,6 +94,7 @@ impl UIState {
             tmatrix : Matrix4::identity(),
             viewport_needs_update,
             viewport_dims : [256.0, 256.0],
+            command_input,
         }
     }
 
@@ -231,29 +235,6 @@ impl UIState {
                     println!("refreshed.");
                 }
 
-                if let Some((_, ref task_handle)) = self.connection {
-
-                    if let Some(ref grbl) = *task_handle.grbl.lock().unwrap() {
-                        ui.text("GRBL ready");
-
-                        if ui.small_button(im_str!("Check GCode Status")) {
-                            println!("GRBL Status");
-                            println!(" {:?}", std::str::from_utf8(&grbl.write_buffer).unwrap());
-                            println!(" {:?}", std::str::from_utf8(&grbl.read_buffer).unwrap());
-                            println!(" {:?}", grbl.machine_status);
-                        }
-                    } else {
-                        ui.text("GRBL not ready");
-                    }
-
-                    if ui.small_button(im_str!("Send GRBL Test Command")) {
-                        task_handle.send_command(crate::grbl::GRBLCommand::CheckGCodeMode);
-                    }
-                    if ui.small_button(im_str!("Send GRBL Test Realtime Command")) {
-                        task_handle.send_realtime_command(crate::grbl::GRBLRealtimeCommand::StatusQuery);
-                    }
-                }
-
             });
 
         // this window shows a list of loaded gcode programs, ui to load them, and ui to select and run programs
@@ -304,9 +285,25 @@ impl UIState {
 
                     if is_active {
                         ui.text(format!("[{:?}]", program.filepath.file_name().unwrap()));
+
+                        if let Some((_, ref conn)) = self.connection {
+                            ui.same_line(ui.window_content_region_width() - 196.0);
+
+                            ui.text(&format!("{:>6} /", conn.gcode_line.load(Ordering::Relaxed)));
+                        }
+
+                        ui.same_line(ui.window_content_region_width() - 128.0);
+
+                        ui.text(format!("{:>6}", program.lines.len()));
                     } else {
                         ui.text(format!(" {:?} ", program.filepath.file_name().unwrap()));
+
+                        ui.same_line(ui.window_content_region_width() - 128.0);
+
+                        ui.text(format!("{:>6}", program.lines.len()));
+
                     }
+
 
                     ui.same_line(ui.window_content_region_width() - 64.0);
 
@@ -368,8 +365,11 @@ impl UIState {
                         if ui.small_button(im_str!("Validate Active Program")) {
                             conn.validate_program(ap.clone());
                         }
+                        if ui.small_button(im_str!("Start Active Program")) {
+                            conn.start_program(ap.clone());
+                        }
 
-                        ui.text(&format!("{}/{}", conn.gcode_line.load(Ordering::Relaxed), ap.lines.len()));
+                        
                     }
                 }
             });
@@ -377,7 +377,7 @@ impl UIState {
 
         // this window contains controls used to give realtime commands
         // to GRBL, such as feed hold, cycle start, abort, and jog.
-        imgui::Window::new(im_str!("Realtime Control"))
+        imgui::Window::new(im_str!("Machine Status"))
             .position(state_window_rect.pos, imgui::Condition::Always)
             .size(state_window_rect.size, imgui::Condition::Always)
             .scroll_bar(true)
@@ -452,6 +452,16 @@ impl UIState {
                 ui.text("Move to Point");
                 ui.separator();
 
+                ui.input_text(im_str!("Command Input"), &mut self.command_input)
+                    .build();
+
+
+                if ui.small_button(im_str!("Send Command")) {
+                    if let Some((_, ref conn)) = self.connection {
+                        conn.send_string(self.command_input.to_string());
+                        self.command_input.clear();
+                    }
+                }
             });
 
 
