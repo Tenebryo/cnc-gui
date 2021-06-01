@@ -384,10 +384,11 @@ impl UIState {
             .resizable(false)
             .build(ui, || {
                 if let Some(ref conn) = self.connection {
-                    if let Some(ref grbl) = *conn.1.grbl.lock().unwrap() {
-                        ui.text(&format!("state: {:?}", grbl.machine_status.state));
-                        ui.text(&format!(" mpos: {:?}", grbl.machine_status.machine_position));
-                    }
+
+                    let machine_status = conn.1.get_machine_status();
+
+                    ui.text(&format!("state: {:?}", machine_status.state));
+                    ui.text(&format!(" mpos: {:?}", machine_status.machine_position));
                 }
             });
 

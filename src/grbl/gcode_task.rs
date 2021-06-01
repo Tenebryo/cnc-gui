@@ -9,11 +9,11 @@ use std::{sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc::*}
 
 use crate::simulation::GcodeProgram;
 
-use super::{GRBLCommand, GRBLConnection, GRBLRealtimeCommand, GRBLState};
+use super::{GRBLCommand, GRBLConnection, GRBLRealtimeCommand, GRBLState, GRBLStatus};
 
 
 pub struct GCodeTaskHandle {
-    pub grbl : Arc<Mutex<Option<GRBLConnection>>>,
+    pub grbl : Arc<Mutex<GRBLStatus>>,
     pub sender : Sender<GCodeTaskMessage>,
     pub paused : Arc<AtomicBool>,
     pub has_gcode : Arc<AtomicBool>,
@@ -99,6 +99,10 @@ impl GCodeTaskHandle {
 
         self.join.join().unwrap();
     }
+
+    pub fn get_machine_status(&self) -> GRBLStatus {
+        self.grbl.lock().unwrap().clone()
+    }
 }
 
 pub enum GCodeTaskMessage {
@@ -120,15 +124,13 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
 
     let mut validating = false;
 
-    let grbl = Arc::new(Mutex::new(None));
+    let grbl_status = Arc::new(Mutex::new(GRBLStatus::default()));
     let join = {
-        let grbl = grbl.clone();
+        let grbl_status = grbl_status.clone();
         let paused = paused.clone();
         let gcode_line = gcode_line.clone();
         std::thread::spawn(move || {
-            let conn = GRBLConnection::open(&path, baud_rate).unwrap();
-
-            grbl.lock().unwrap().insert(conn);
+            let mut grbl = GRBLConnection::open(&path, baud_rate).unwrap();
 
             let mut gcode_iter = None;
 
@@ -142,9 +144,7 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
 
                 if last_status.elapsed() > Duration::from_millis(500) {
 
-                    if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                        grbl.execute_realtime_command(GRBLRealtimeCommand::StatusQuery);
-                    }
+                    grbl.execute_realtime_command(GRBLRealtimeCommand::StatusQuery);
 
                     last_status = Instant::now();
                 }
@@ -159,10 +159,8 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                             validating = true;
 
                             gcode_line.store(0, Ordering::Relaxed);
-                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                if grbl.machine_status.state != GRBLState::Check {
-                                    grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
-                                }
+                            if grbl.machine_status.state != GRBLState::Check {
+                                grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
                             }
 
                             gcode_iter = Some(prog.lines.into_iter());
@@ -172,34 +170,26 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                             gcode_iter = None;
                         }
                         GCodeTaskMessage::RealtimeCommand(rtcmd) => {
-                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                grbl.execute_realtime_command(rtcmd);
-                            }
+                            grbl.execute_realtime_command(rtcmd);
                         }
                         GCodeTaskMessage::SendCommand(cmd) => {
-                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                grbl.send_message(String::from_utf8(cmd.to_bytes()).unwrap()).unwrap();
-                            }
+                            grbl.send_message(String::from_utf8(cmd.to_bytes()).unwrap()).unwrap();
                         }
                         GCodeTaskMessage::Stop => {
                             return;
                         }
                         GCodeTaskMessage::SendString(s) => {
-                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                grbl.send_message(s).unwrap();
-                            }
+                            grbl.send_message(s).unwrap();
                         }
                     }
                 }
 
-                let grbl_ready = grbl.lock().unwrap().as_ref().map(|grbl| grbl.ready).unwrap_or(false);
-                let grbl_error = grbl.lock().unwrap().as_ref().map(|grbl| grbl.error).unwrap_or(false);
+                let grbl_ready = grbl.ready;
+                let grbl_error = grbl.error;
 
                 if validating && grbl_error {
                     gcode_iter = None;
-                    if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                        grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
-                    }
+                    grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
                     validating = false;
                 }
 
@@ -212,19 +202,15 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                                 line += "\n";
                             }
 
-                            if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                grbl.send_message(line).unwrap();
-                                gcode_line.fetch_add(1, Ordering::Relaxed);
-                            }
+                            grbl.send_message(line).unwrap();
+                            gcode_line.fetch_add(1, Ordering::Relaxed);
                         }
                         Some(None) => {
                             gcode_iter = None;
 
                             if validating {
 
-                                if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                                    grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
-                                }
+                                grbl.send_message(String::from_utf8(GRBLCommand::CheckGCodeMode.to_bytes()).unwrap()).unwrap();
                                 validating = false;
                             }
                         }
@@ -232,15 +218,15 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                     }
                 }
 
-                if let Some(ref mut grbl) = *grbl.lock().unwrap() {
-                    grbl.poll().unwrap();
-                }
+                grbl.poll().unwrap();
+
+                *grbl_status.lock().unwrap() = grbl.machine_status.clone();
             }
         })
     };
 
     GCodeTaskHandle {
-        grbl,
+        grbl : grbl_status,
         sender: tx,
         paused,
         has_gcode,
