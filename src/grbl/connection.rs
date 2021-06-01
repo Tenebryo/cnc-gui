@@ -1,81 +1,24 @@
-
+/*!
+ * 
+ * This file contains the logic to communicate with GRBL and keep an updated state.
+ * 
+ */
 
 use std::time::Duration;
-use serialport::SerialPort;
-use std::collections::VecDeque;
 use pest::Parser;
-
-// use std::{pin::Pin, task::{Context, Poll}, time::Duration};
-// use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
-// use tokio_util::codec::{Decoder, Encoder, Framed};
-
-// use bytes::BytesMut;
+use serialport::{ErrorKind, SerialPort};
 
 use super::*;
 
-// struct GRBLCodec;
-
-// impl Encoder<GRBLCommand> for GRBLCodec {
-//     type Error = tokio::io::Error;
-
-//     fn encode(&mut self, item: GRBLCommand, dst: &mut BytesMut) -> Result<(), Self::Error> {
-
-//         dst.extend(item.to_bytes().iter());
-
-//         Ok(())
-//     }
-// }
-
-// impl Decoder for GRBLCodec {
-//     type Item = GRBLStatus;
-//     type Error = Box<dyn std::error::Error>;
-
-//     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        
-//         Ok(None)
-//     }
-// }
-
-
-// struct AsyncSerialPort(Box<dyn serialport::SerialPort>);
-
-// impl AsyncRead for AsyncSerialPort {
-//     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<tokio::io::Result<()>> {
-//         let mut rbuf = [0; 1024];
-//         let n = self.0.read(&mut rbuf)?;
-//         buf.initialize_unfilled_to(n).copy_from_slice(&rbuf[..n]);
-
-//         Poll::Ready(Ok(()))
-//     }
-// }
-
-// impl AsyncWrite for AsyncSerialPort {
-//     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, tokio::io::Error>> {
-
-//         Poll::Ready(self.0.write(buf).into())
-//     }
-
-//     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
-//         Poll::Ready(Ok(()))
-//     }
-
-//     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), tokio::io::Error>> {
-//         Poll::Ready(Ok(()))
-//     }
-// }
-
-use std::sync::Arc;
-use std::sync::Mutex;
-
-
 pub struct GRBLConnection {
-    port : Arc<Mutex<Box<dyn SerialPort>>>,
-    command_queue : VecDeque<GRBLCommand>,
-    send_line : bool,
-    machine_status : GRBLStatus,
-    alarm : Option<u8>,
-    settings : Option<GRBLSettings>,
+    pub port : Box<dyn SerialPort>,
+    pub machine_status : GRBLStatus,
+    pub alarm : Option<u8>,
+    pub settings : Option<GRBLSettings>,
+    pub read_buffer : Vec<u8>,
+    pub write_buffer : Vec<u8>,
+    pub ready : bool,
+    pub error : bool,
 }
 
 use std::error::Error;
@@ -83,43 +26,76 @@ use std::error::Error;
 impl GRBLConnection {
     pub fn open(path : &str, baud_rate : u32) -> Result<Self, Box<dyn Error>> {
 
-        let port = serialport::new(path, baud_rate)
-            .timeout(Duration::from_millis(500))
+        let mut port = serialport::new(path, baud_rate)
+            .timeout(Duration::from_millis(100))
             .open()?;
 
-        let port = Arc::new(Mutex::new(port));
+        port.set_timeout(Duration::from_millis(1)).unwrap();
 
         Ok(Self {
             port,
-            command_queue : VecDeque::new(),
-            send_line : false,
             machine_status : GRBLStatus::default(),
             alarm : None,
             settings : None,
+            read_buffer : vec![],
+            write_buffer : vec![],
+            ready : true,
+            error : false,
         })
     }
 
-    pub fn queue_command(&mut self, command : GRBLCommand) {
-        self.command_queue.push_back(command);
+    pub fn send_message(&mut self, msg : String) -> Result<(), Box<dyn Error>> {
+
+        self.ready = false;
+        self.write_buffer.extend(msg.bytes());
+
+        Ok(())
     }
 
     pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
 
+        // read up to 1024 chars
         let mut buf = [0;1024];
-        let n = self.port.lock().unwrap().read(&mut buf)?;
+        let n = match self.port.read(&mut buf) {
+            Ok(n) => {n}
+            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {0}
+            Err(e) => {return Err(e.into());}
+        };
 
-        println!("Received: {}", String::from_utf8(buf[..n].to_vec()).unwrap());
+        let mut read_buffer = core::mem::replace(&mut self.read_buffer, vec![]);
+
+        read_buffer.extend_from_slice(&buf[..n]);
+
+        //check if the message is complete
+        if let Some(n) = self.handle_message(std::str::from_utf8(&read_buffer).expect("utf-8 encoding error")) {
+            read_buffer.drain(0..n);
+        }
+
+        self.read_buffer = read_buffer;
+
+        if self.write_buffer.len() > 0 {
+
+            // write message if available
+            let n = match self.port.write(&self.write_buffer) {
+                Ok(n) => {n}
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {0}
+                Err(e) => {return Err(e.into());}
+            };
+
+            // self.write_buffer.drain(0..n);
+            let sent = self.write_buffer.drain(0..n).collect::<Vec<_>>();
+
+            println!("sent: {:?}", std::str::from_utf8(&sent).unwrap());
+        }
 
         Ok(())
     }
 
     pub fn execute_realtime_command(&mut self, command : GRBLRealtimeCommand) {
-        self.port.lock().unwrap().write(&[command as u8]).unwrap();
+        self.port.write_all(&[command as u8]).unwrap();
     }
 
-    pub fn handle_message(&mut self, offset : usize) -> Option<usize> {
-        let s = std::str::from_utf8(&[]).expect("utf-8 encoding error");
-
+    pub fn handle_message(&mut self, s : &str) -> Option<usize> {
         
         if let Ok(mut parsed) = GRBLParser::parse(Rule::line, s) {
 
@@ -127,10 +103,14 @@ impl GRBLConnection {
 
                 let consumed = msg.as_span().end();
 
+                // if msg.as_rule() != Rule::unrecognized_message {
+                //     println!("processed message: {:?}: {:?}", msg.as_rule(), msg.as_str());
+                // }
+
                 match msg.as_rule() {
                     Rule::response_message => {
                         let msg = msg.into_inner().next()?;
-                        self.send_line = true; 
+                        self.ready = true; 
                         match msg.as_rule() {
                             Rule::ok => {}
                             Rule::error => {
@@ -238,6 +218,7 @@ impl GRBLConnection {
                             }
                             Rule::startup_line => {
                                 //log
+                                println!("received GBRL startup");
                             }
                             Rule::welcome_message => {}
                             Rule::settings_message => {}

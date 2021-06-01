@@ -1,7 +1,7 @@
 
 use cgmath::*;
-use std::time::Instant;
-use crate::{WindowRect, gcode_renderer::GCodeRenderer};
+use std::{sync::Mutex, time::Instant};
+use crate::{WindowRect, gcode_renderer::GCodeRenderer, grbl::{GCodeTaskHandle, start_gcode_sender_task}};
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -18,7 +18,7 @@ use crate::simulation::GcodeProgram;
 
 pub struct UIState {
     pub ports                       : Vec<SerialPortInfo>,
-    pub connection                  : Option<(usize, GRBLConnection)>,
+    pub connection                  : Option<(usize, GCodeTaskHandle)>,
     pub dialog_open                 : Arc<AtomicBool>,
     pub open_path                   : Arc<std::sync::Mutex<imgui::ImString>>,
     pub baud_rate_i                 : usize,
@@ -44,7 +44,7 @@ impl UIState {
         let ports = serialport::available_ports().expect("No ports found!");
 
         // let mut connection : Option<(usize, usize)> = None;
-        let connection : Option<(usize, GRBLConnection)> = None;
+        let connection : Option<(usize, GCodeTaskHandle)> = None;
 
         let dialog_open = Arc::new(AtomicBool::new(false));
         let open_path = Arc::new(std::sync::Mutex::new(imgui::ImString::new(String::new())));
@@ -96,6 +96,7 @@ impl UIState {
 
 
     pub fn frame(&mut self, ui : &mut imgui::Ui, async_runtime : &mut tokio::runtime::Runtime, line_renderer : &mut GCodeRenderer, win : &Window) {
+
         use imgui::*;
         use imgui::im_str;
 
@@ -136,6 +137,8 @@ impl UIState {
 
         let port_window_h = 256.0;
 
+        let machine_state_h = 256.0;
+
         let port_window_rect = WindowRect{
             pos : [0.0, menu_bar_h],
             size : [side_panel_w, port_window_h],
@@ -147,8 +150,13 @@ impl UIState {
         };
 
         let machine_window_rect = WindowRect{
+            pos : [wdth - side_panel_w, menu_bar_h + machine_state_h],
+            size : [side_panel_w, hght - menu_bar_h - machine_state_h],
+        };
+
+        let state_window_rect = WindowRect{
             pos : [wdth - side_panel_w, menu_bar_h],
-            size : [side_panel_w, hght - menu_bar_h],
+            size : [side_panel_w, machine_state_h],
         };
 
         let viewport_window_rect = WindowRect{
@@ -210,10 +218,8 @@ impl UIState {
                         ui.text(&format!("[{:2}] {:?}", i, p.port_name));
                         ui.same_line(ww - 80.0);
                         if ui.small_button(im_strf!("Connect##{}", p.port_name)) {
-                            println!("Connected {}", p.port_name);
-                            if let Ok(connection) = GRBLConnection::open(&p.port_name, self.baud_rate as u32) {
-                                self.connection = Some((i, connection));
-                            }
+                            let gcode_task_handle = start_gcode_sender_task(p.port_name.clone(), self.baud_rate as u32);
+                            self.connection = Some((i, gcode_task_handle));
                         }
                     }
                 }
@@ -224,6 +230,30 @@ impl UIState {
                     self.ports = serialport::available_ports().expect("No ports found!");
                     println!("refreshed.");
                 }
+
+                if let Some((_, ref task_handle)) = self.connection {
+
+                    if let Some(ref grbl) = *task_handle.grbl.lock().unwrap() {
+                        ui.text("GRBL ready");
+
+                        if ui.small_button(im_str!("Check GCode Status")) {
+                            println!("GRBL Status");
+                            println!(" {:?}", std::str::from_utf8(&grbl.write_buffer).unwrap());
+                            println!(" {:?}", std::str::from_utf8(&grbl.read_buffer).unwrap());
+                            println!(" {:?}", grbl.machine_status);
+                        }
+                    } else {
+                        ui.text("GRBL not ready");
+                    }
+
+                    if ui.small_button(im_str!("Send GRBL Test Command")) {
+                        task_handle.send_command(crate::grbl::GRBLCommand::CheckGCodeMode);
+                    }
+                    if ui.small_button(im_str!("Send GRBL Test Realtime Command")) {
+                        task_handle.send_realtime_command(crate::grbl::GRBLRealtimeCommand::StatusQuery);
+                    }
+                }
+
             });
 
         // this window shows a list of loaded gcode programs, ui to load them, and ui to select and run programs
@@ -270,7 +300,9 @@ impl UIState {
 
                 self.gcode_programs.clone().lock().unwrap().drain_filter(|program| {
 
-                    if Some(program.filepath.clone()) == active_path {
+                    let is_active = Some(program.filepath.clone()) == active_path;
+
+                    if is_active {
                         ui.text(format!("[{:?}]", program.filepath.file_name().unwrap()));
                     } else {
                         ui.text(format!(" {:?} ", program.filepath.file_name().unwrap()));
@@ -281,36 +313,38 @@ impl UIState {
                     let load_id = ImString::from(format!("Load##{:?}", program.filepath));
                     let del_id = ImString::from(format!("X##{:?}", program.filepath));
 
-                    if ui.small_button(&load_id) {
-                        self.active_program = Some(program.clone());
-                        line_renderer.create_line_buffer(&self.active_program.as_ref().unwrap().motionpath);
-                        self.viewport_needs_update = true;
+                    if !is_active {
+                        if ui.small_button(&load_id) {
+                            self.active_program = Some(program.clone());
+                            line_renderer.create_line_buffer(&self.active_program.as_ref().unwrap().motionpath);
+                            self.viewport_needs_update = true;
 
-                        let mut minx = f32::MAX;
-                        let mut miny = f32::MAX;
+                            let mut minx = f32::MAX;
+                            let mut miny = f32::MAX;
 
-                        let mut maxx = -f32::MAX;
-                        let mut maxy = -f32::MAX;
+                            let mut maxx = -f32::MAX;
+                            let mut maxy = -f32::MAX;
 
-                        let mut sum = Vector3::new(0.0, 0.0, 0.0);
+                            let mut sum = Vector3::new(0.0, 0.0, 0.0);
 
-                        for mp in program.motionpath.iter() {
-                            sum += mp.pos;
+                            for mp in program.motionpath.iter() {
+                                sum += mp.pos;
 
-                            let t = self.tmatrix * mp.pos.extend(1.0);
+                                let t = self.tmatrix * mp.pos.extend(1.0);
 
-                            minx = minx.min(t.x);
-                            miny = miny.min(t.y);
+                                minx = minx.min(t.x);
+                                miny = miny.min(t.y);
 
-                            maxx = maxx.max(t.x);
-                            maxy = maxy.max(t.y);
-                        }
+                                maxx = maxx.max(t.x);
+                                maxy = maxy.max(t.y);
+                            }
 
-                        sum /= program.motionpath.len() as f32;
+                            sum /= program.motionpath.len() as f32;
 
-                        if maxx - minx > 0.001 || maxy - miny > 0.001 {
-                            self.scale *= 1.0 / (maxx-minx).max(maxy-miny);
-                            self.center = sum;
+                            if maxx - minx > 0.001 || maxy - miny > 0.001 {
+                                self.scale *= 1.0 / (maxx-minx).max(maxy-miny);
+                                self.center = sum;
+                            }
                         }
                     }
 
@@ -328,6 +362,34 @@ impl UIState {
 
                     false
                 });
+
+                if let Some(ref ap) = self.active_program {
+                    if let Some((_, ref conn)) = self.connection {
+                        if ui.small_button(im_str!("Validate Active Program")) {
+                            conn.validate_program(ap.clone());
+                        }
+
+                        ui.text(&format!("{}/{}", conn.gcode_line.load(Ordering::Relaxed), ap.lines.len()));
+                    }
+                }
+            });
+
+
+        // this window contains controls used to give realtime commands
+        // to GRBL, such as feed hold, cycle start, abort, and jog.
+        imgui::Window::new(im_str!("Realtime Control"))
+            .position(state_window_rect.pos, imgui::Condition::Always)
+            .size(state_window_rect.size, imgui::Condition::Always)
+            .scroll_bar(true)
+            .collapsible(false)
+            .resizable(false)
+            .build(ui, || {
+                if let Some(ref conn) = self.connection {
+                    if let Some(ref grbl) = *conn.1.grbl.lock().unwrap() {
+                        ui.text(&format!("state: {:?}", grbl.machine_status.state));
+                        ui.text(&format!(" mpos: {:?}", grbl.machine_status.machine_position));
+                    }
+                }
             });
 
         // this window contains controls used to give realtime commands

@@ -220,9 +220,6 @@ impl GCodeRenderer {
 
         for [p0, p1] in motion_path.array_windows::<2>() {
 
-
-            let d = (p1.pos - p0.pos).normalize();
-
             let col = match p0.ty {
                 MotionType::Rapid  => {[1.0, 0.1, 0.0, 1.0]}
                 MotionType::Linear => {[0.0, 0.4, 1.0, 1.0]}
@@ -233,13 +230,13 @@ impl GCodeRenderer {
                     pos : (p0.pos).into(),
                     // col : [0.2, 0.2, 0.2, 1.0],
                     col,
-                    time : 0.0,
+                    time : p0.time,
                 },
                 Vertex {
                     pos : (p1.pos).into(),
                     // col : [0.2, 0.2, 0.2, 1.0],
                     col,
-                    time : 0.0,
+                    time : p1.time,
                 },
             ]);
         }

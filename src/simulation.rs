@@ -52,13 +52,13 @@ impl Default for MotionPoint {
 #[derive(Debug, Clone)]
 pub struct GcodeProgram {
     pub filepath : PathBuf,
-    pub program : String,
+    pub lines : Vec<String>,
     pub motionpath : Vec<MotionPoint>,
 }
 
 impl GcodeProgram {
     pub fn load(path : PathBuf, program : String) -> GcodeProgram {
-        let segments = gcode_to_path_segments(&program);
+        let (segments, lines) = gcode_to_path_segments(&program);
 
         let mut lp = Vector3::new(0.0, 0.0, 0.0);
         let speed = 400.0;
@@ -76,7 +76,7 @@ impl GcodeProgram {
 
         GcodeProgram {
             filepath: path,
-            program,
+            lines,
             motionpath,
         }
     }
@@ -109,7 +109,7 @@ struct SimulationState {
     coord_offset : Vec3,
 }
 
-pub fn gcode_to_path_segments(nc : &str) -> Vec<MotionPoint> {
+pub fn gcode_to_path_segments(nc : &str) -> (Vec<MotionPoint>, Vec<String>) {
 
     let lines = gcode::parse(nc);
 
@@ -133,7 +133,11 @@ pub fn gcode_to_path_segments(nc : &str) -> Vec<MotionPoint> {
 
     path.push(MotionPoint{pos : state.position, ..Default::default()});
 
+    let mut string_lines = vec![];
+
     for (_, l) in lines.iter().enumerate() {
+
+        string_lines.push(l.line.to_string());
 
         for word in l.words.iter() {
             match word {
@@ -354,5 +358,5 @@ pub fn gcode_to_path_segments(nc : &str) -> Vec<MotionPoint> {
     }
 
 
-    path
+    (path, string_lines)
 }

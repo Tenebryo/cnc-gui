@@ -1,4 +1,4 @@
-WHITESPACE = _{"\n"}
+WHITESPACE = _{"\n" | "\r"}
 
 float = @{
     "-"?
@@ -120,4 +120,7 @@ push_message = {
     | settings_message
 }
 
-line = _{ push_message | response_message }
+
+unrecognized_message = @{ (!("\r" | "\n") ~ ANY)* ~ "\r\n"}
+
+line = _{ push_message | response_message | unrecognized_message}

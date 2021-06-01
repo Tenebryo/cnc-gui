@@ -62,8 +62,6 @@ fn main() {
     event_loop.run(move |event, _, control_flow| {
 
         if ui_state.connection.is_some() {
-            let connection = ui_state.connection.as_mut().unwrap();
-            connection.1.poll();
         }
 
         match event {

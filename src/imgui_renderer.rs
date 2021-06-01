@@ -235,12 +235,13 @@ impl System {
             .join(core::mem::replace(&mut self.acquire_future, None).expect("No acquire future, was `start_frame` called?"))
             .then_execute(self.queue.clone(), cmd_buf)
             .unwrap()
-            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num)
-            .then_signal_fence_and_flush();
+            .then_signal_fence()
+            .then_swapchain_present(self.queue.clone(), self.swapchain.clone(), image_num);
 
-        match future {
-            Ok(future) => {
-                self.previous_frame_end = Some(future.boxed());
+        match future.flush() {
+            Ok(_) => {
+                // self.previous_frame_end = Some(future.boxed());
+                self.previous_frame_end = Some(Box::new(future));
             }
             Err(FlushError::OutOfDate) => {
                 self.recreate_swapchain = true;
