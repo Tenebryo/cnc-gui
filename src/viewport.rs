@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use imgui::TextureId;
-use vulkano::{format::Format, image::AttachmentImage, render_pass::{Framebuffer, FramebufferAbstract, RenderPass}};
-use vulkano::sampler::Sampler;
-use crate::imgui_renderer::System;
+
+use vulkano::format::Format;
+use vulkano::image::AttachmentImage;
 use vulkano::image::view::ImageView;
 use vulkano::image::{ImageCreateFlags, ImageDimensions, ImageUsage, StorageImage};
+use vulkano::render_pass::{Framebuffer, FramebufferAbstract, RenderPass};
+use vulkano::sampler::Sampler;
 
-
+use crate::imgui_renderer::System;
 
 pub struct Viewport {
     pub image : Option<Arc<StorageImage>>,

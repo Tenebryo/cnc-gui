@@ -5,7 +5,10 @@
  * 
  */
 
-use std::{sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}, mpsc::*}, thread::JoinHandle, time::{Duration, Instant}};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, mpsc::*};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::simulation::GcodeProgram;
 

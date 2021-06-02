@@ -561,9 +561,7 @@ impl UIState {
                 }
 
                 self.tmatrix = 
-                    Matrix4::from_nonuniform_scale(1.0, dims[0] / dims[1], 1.0) * 
-                    Matrix4::from_translation(Vector3::new(0.0, 0.0, 0.5)) *
-                    Matrix4::from_nonuniform_scale(self.scale, self.scale, 0.0001) * 
+                    Matrix4::from_scale(self.scale) * 
                     Matrix4::from(self.orientation) *
                     Matrix4::from_translation(self.center);
                 

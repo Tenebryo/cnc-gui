@@ -1,27 +1,24 @@
 use imgui::{Context, FontConfig, FontSource};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
-
-
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer};
+use vulkano::device::Queue;
 use vulkano::device::{Device, DeviceExtensions};
+use vulkano::format::Format;
 use vulkano::image::{ImageUsage, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
+use vulkano::swapchain::Surface;
 use vulkano::swapchain;
+use vulkano::sync::{FlushError, GpuFuture};
+use vulkano::sync;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
     SwapchainCreationError,
 };
-use vulkano::format::Format;
-use vulkano::sync;
-use vulkano::device::Queue;
-use vulkano::sync::{FlushError, GpuFuture};
-use vulkano::swapchain::Surface;
-
 
 use vulkano_win::VkSurfaceBuild;
 
-use winit::event_loop::{EventLoop};
+use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
 use std::sync::Arc;

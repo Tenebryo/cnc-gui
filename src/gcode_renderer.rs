@@ -1,22 +1,24 @@
 use cgmath::*;
-use image::flat::View;
 use imgui::TextureId;
 
-use vulkano::{buffer::{cpu_pool::CpuBufferPoolChunk, view}, command_buffer::PrimaryAutoCommandBuffer, format::ClearValue, image::{ImageCreateFlags, view::ImageView}, memory::pool::StdMemoryPool, sampler::Sampler};
-use vulkano::pipeline::input_assembly::PrimitiveTopology;
-use vulkano::command_buffer::DynamicState;
-use vulkano::buffer::CpuBufferPool;
 use vulkano::buffer::BufferUsage;
-use vulkano::command_buffer::SubpassContents;
+use vulkano::buffer::cpu_pool::CpuBufferPoolChunk;
+use vulkano::buffer::CpuBufferPool;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
-use vulkano::{image::StorageImage, pipeline::GraphicsPipeline};
-use vulkano::render_pass::Subpass;
+use vulkano::command_buffer::DynamicState;
+use vulkano::command_buffer::PrimaryAutoCommandBuffer;
+use vulkano::command_buffer::SubpassContents;
+use vulkano::format::ClearValue;
+use vulkano::format::Format;
+use vulkano::memory::pool::StdMemoryPool;
+use vulkano::pipeline::input_assembly::PrimitiveTopology;
 use vulkano::render_pass::RenderPass;
-use std::sync::Arc;
-
+use vulkano::render_pass::Subpass;
+use vulkano::{image::StorageImage, pipeline::GraphicsPipeline};
 use vulkano::{impl_vertex, pipeline::GraphicsPipelineAbstract};
 
-use vulkano::format::Format;
+use std::sync::Arc;
+
 use crate::viewport::Viewport;
 
 pub mod line_fs {vulkano_shaders::shader!{ty: "fragment",path: "src/shaders/line.frag",               include: [],}}
@@ -114,9 +116,14 @@ impl GCodeRenderer {
         }
     }
 
-    pub fn render(&mut self, system : &mut System, viewport : &Viewport, cmd_buf_builder : &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, tmatrix : Matrix4<f32>, width : u32, height : u32) {
+    pub fn render(&mut self, _system : &mut System, viewport : &Viewport, cmd_buf_builder : &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>, tmatrix : Matrix4<f32>, width : u32, height : u32) {
 
         let framebuffer = viewport.create_framebuffer(self.render_pass.clone());
+
+        let v_matrix = 
+            Matrix4::from_nonuniform_scale(1.0, width as f32 / height as f32, 1.0) * 
+            Matrix4::from_translation(Vector3::new(0.0, 0.0, 0.5)) *
+            Matrix4::from_nonuniform_scale(1.0, 1.0, 0.0001);
 
         if let Some(framebuffer) = framebuffer {
 
@@ -143,7 +150,7 @@ impl GCodeRenderer {
                 cmd_buf_builder.draw(
                     self.pipeline.clone(), &ds, vec![vb.clone()], (), 
                         line_vs::ty::PushConstants {
-                            matrix : tmatrix.into(),
+                            matrix : (v_matrix * tmatrix).into(),
                             viewport : [width as f32, height as f32],
                         },
                         vec![]
