@@ -40,13 +40,8 @@ impl GCodeTaskHandle {
         }
     }
 
-    pub fn stop_program(&self) -> bool {
-        if self.has_gcode.load(Ordering::SeqCst) {
-            self.sender.send(GCodeTaskMessage::StopProgram).unwrap();
-            true
-        } else {
-            false
-        }
+    pub fn stop_program(&self) {
+        self.sender.send(GCodeTaskMessage::StopProgram).unwrap();
     }
 
     pub fn send_realtime_command(&self, cmd : GRBLRealtimeCommand) -> bool {
@@ -122,6 +117,7 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
         let grbl_status = grbl_status.clone();
         let paused = paused.clone();
         let gcode_line = gcode_line.clone();
+        let has_gcode = has_gcode.clone();
         std::thread::spawn(move || {
             let mut grbl = GRBLConnection::open(&path, baud_rate).unwrap();
 
@@ -160,7 +156,9 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
 
                         }
                         GCodeTaskMessage::StopProgram => {
+                            println!("stopped program");
                             gcode_iter = None;
+                            has_gcode.store(false, Ordering::Relaxed);
                         }
                         GCodeTaskMessage::RealtimeCommand(rtcmd) => {
                             grbl.execute_realtime_command(rtcmd);
@@ -176,6 +174,8 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                         }
                     }
                 }
+
+                has_gcode.store(gcode_iter.is_some(), Ordering::Relaxed);
 
                 let grbl_ready = grbl.ready;
                 let grbl_error = grbl.error;

@@ -369,7 +369,7 @@ impl UIState {
                         if ui.small_button(im_str!("Start Program")) {
                             conn.start_program(ap.clone());
                         }
-                        if conn.paused.load(Ordering::Relaxed) {
+                        if !conn.paused.load(Ordering::Relaxed) {
                             if ui.small_button(im_str!("Pause Program")) {
                                 conn.pause_gcode();
                             }
