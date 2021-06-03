@@ -104,7 +104,7 @@ impl GRBLConnection {
                 let consumed = msg.as_span().end();
 
                 if msg.as_rule() == Rule::unrecognized_message && msg.as_str() != "\r\n" {
-                    println!("processed message: {:?}: {:?}", msg.as_rule(), msg.as_str());
+                    println!("received unrecognized message: {:?}: {:?}", msg.as_rule(), msg.as_str());
                 }
 
                 match msg.as_rule() {
@@ -235,10 +235,21 @@ impl GRBLConnection {
                             }
                             Rule::startup_line => {
                                 //log
-                                println!("received GBRL startup");
+                                println!("received GBRL startup.");
                             }
-                            Rule::welcome_message => {}
-                            Rule::settings_message => {}
+                            Rule::welcome_message => {
+                                println!("Received GRBL welcome message.")
+                            }
+                            Rule::settings_message => {
+                                let mut inner = msg.into_inner();
+                                if let (Some(s), Some(v)) = (inner.next(), inner.next()) {
+                                    if let Some(ref mut settings) = self.settings {
+                                        if let Ok(s) = s.as_str().parse::<u8>() {
+                                            settings.parse_setting(s, v.as_str());
+                                        }
+                                    }
+                                }
+                            }
                             _ => unreachable!()
                         }
                     }

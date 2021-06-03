@@ -2,7 +2,7 @@
 use cgmath::*;
 use imgui::ImString;
 use std::time::Instant;
-use crate::{WindowRect, gcode_renderer::GCodeRenderer, grbl::{GCodeTaskHandle, start_gcode_sender_task}};
+use crate::{WindowRect, gcode_renderer::GCodeRenderer, grbl::{GCodeTaskHandle, GRBLCommand, start_gcode_sender_task}};
 use std::sync::Arc;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -37,6 +37,9 @@ pub struct UIState {
     pub viewport_needs_update       : bool,
     pub viewport_dims               : [f32; 2],
     pub command_input               : ImString,
+    pub command_history             : Vec<String>,
+    pub previous_frame_end          : Instant,
+    pub jog_feed_rate               : f32,
 }
 
 impl UIState {
@@ -94,6 +97,9 @@ impl UIState {
             viewport_needs_update,
             viewport_dims : [256.0, 256.0],
             command_input,
+            command_history : vec![],
+            previous_frame_end : Instant::now(),
+            jog_feed_rate : 200.0,
         }
     }
 
@@ -153,12 +159,12 @@ impl UIState {
         };
 
         let machine_window_rect = WindowRect{
-            pos : [wdth - side_panel_w, menu_bar_h + machine_state_h],
+            pos : [wdth - side_panel_w, menu_bar_h],
             size : [side_panel_w, hght - menu_bar_h - machine_state_h],
         };
 
         let state_window_rect = WindowRect{
-            pos : [wdth - side_panel_w, menu_bar_h],
+            pos : [wdth - side_panel_w, hght - machine_state_h],
             size : [side_panel_w, machine_state_h],
         };
 
@@ -388,19 +394,33 @@ impl UIState {
 
         // this window contains controls used to give realtime commands
         // to GRBL, such as feed hold, cycle start, abort, and jog.
-        imgui::Window::new(im_str!("Machine Status"))
+        imgui::Window::new(im_str!("Command Input"))
             .position(state_window_rect.pos, imgui::Condition::Always)
             .size(state_window_rect.size, imgui::Condition::Always)
             .scroll_bar(true)
             .collapsible(false)
             .resizable(false)
             .build(ui, || {
-                if let Some(ref conn) = self.connection {
 
-                    let machine_status = conn.1.get_machine_status();
+                let hit_enter = ui.input_text(im_str!("##Command Input"), &mut self.command_input)
+                    .enter_returns_true(true)
+                    .build();
 
-                    ui.text(&format!("state: {:?}", machine_status.state));
-                    ui.text(&format!(" mpos: {:?}", machine_status.machine_position));
+
+                if ui.small_button(im_str!("Send Command")) || hit_enter {
+                    if let Some((_, ref conn)) = self.connection {
+                        conn.send_string(self.command_input.to_string());
+                        self.command_history.push(self.command_input.to_string());
+                        self.command_input.clear();
+                    }
+                }
+
+                for (i, cmd) in self.command_history.iter().enumerate() {
+                    ui.text(format!("[{}] {}", i, cmd));
+                    ui.same_line(state_window_rect.size[0] - 32.0);
+                    if ui.small_button(im_strf!("^##[{}]{}",i,cmd)) {
+                        self.command_input = ImString::new(cmd);
+                    }
                 }
             });
 
@@ -420,7 +440,7 @@ impl UIState {
                 let machine_status = self.connection.as_ref().map(|conn| conn.1.get_machine_status()).unwrap_or_default();
 
 
-                ui.text("Machine State");
+                ui.text(format!("Machine State: {:?}", machine_status.state));
                 ui.separator();
 
                 match machine_status.state {
@@ -435,8 +455,54 @@ impl UIState {
                     crate::grbl::GRBLState::Sleep   => {}
                 }
 
-                ui.text(format!("{:?}", machine_status.state));
 
+                let tok = ui.push_style_colors(&[
+                    (StyleColor::Button,        [0.0, 0.5, 0.0, 1.0]),
+                    (StyleColor::ButtonActive,  [0.0, 0.75, 0.0, 1.0]),
+                    (StyleColor::ButtonHovered, [0.0, 1.0, 0.0, 1.0])
+                ]);
+
+
+                if ui.button(im_str!("Start##Cycle Start"), [ww / 3.0 - 10.0, 24.0]) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::CycleStartOrResume);
+                    }
+                }
+                tok.pop(ui);
+
+                ui.same_line(ww / 3.0 + 10.0);
+
+                let tok = ui.push_style_colors(&[
+                    (StyleColor::Button,        [0.5, 0.5, 0.0, 1.0]),
+                    (StyleColor::ButtonActive,  [0.75, 0.75, 0.0, 1.0]),
+                    (StyleColor::ButtonHovered, [0.9, 0.9, 0.0, 1.0])
+                ]);
+                if ui.button(im_str!("Hold##Feed Hold"), [ww / 3.0 - 10.0, 24.0]) {
+
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedHold);
+                    }
+                }
+                tok.pop(ui);
+
+                ui.same_line(2.0 * ww / 3.0 + 10.0);
+
+                let tok = ui.push_style_colors(&[
+                    (StyleColor::Button,        [0.5, 0.0, 0.0, 1.0]),
+                    (StyleColor::ButtonActive,  [0.75, 0.0, 0.0, 1.0]),
+                    (StyleColor::ButtonHovered, [1.0, 0.0, 0.0, 1.0])
+                ]);
+                if ui.button(im_str!("Reset##Reset"), [ww / 3.0 - 10.0, 24.0]) {
+
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SoftReset);
+                    }
+                }
+
+
+                tok.pop(ui);
+
+                ui.separator();
                 ui.text("Tool Position");
                 ui.separator();
 
@@ -454,9 +520,10 @@ impl UIState {
                     //set work offset
                 }
 
+                let prev_spindle_on = machine_status.spindle_cw || machine_status.spindle_ccw;
 
                 ui.separator();
-                ui.text(if self.spindle_on {"Spindle (on)"} else {"Spindle (off)"});
+                ui.text(if prev_spindle_on {"Spindle (on)"} else {"Spindle (off)"});
                 ui.separator();
 
                 Slider::new(im_str!("Target RPM"))
@@ -464,57 +531,209 @@ impl UIState {
                     .build(ui, &mut self.spindle_rpm_setpoint);
 
 
-                let prev_spindle_on = machine_status.spindle_cw || machine_status.spindle_ccw;
                 self.spindle_on = prev_spindle_on;
 
-                self.spindle_rpm_setpoint = (self.spindle_rpm_setpoint as f32 / 100.0).round() as i32 * 100;
+                self.spindle_rpm_setpoint = (self.spindle_rpm_setpoint as f32 / 25.0).round() as i32 * 25;
 
                 let tok = ui.push_style_colors(&[
-                    (StyleColor::Button,        if self.spindle_on {[0.0, 0.1, 0.0, 1.0]} else {[0.0, 0.5, 0.0, 1.0]}),
-                    (StyleColor::ButtonActive,  if self.spindle_on {[0.0, 0.1, 0.0, 1.0]} else {[0.0, 0.75, 0.0, 1.0]}),
-                    (StyleColor::ButtonHovered, if self.spindle_on {[0.0, 0.1, 0.0, 1.0]} else {[0.0, 1.0, 0.0, 1.0]})
+                    (StyleColor::Button,        [0.0, 0.5, 0.0, 1.0]),
+                    (StyleColor::ButtonActive,  [0.0, 0.75, 0.0, 1.0]),
+                    (StyleColor::ButtonHovered, [0.0, 1.0, 0.0, 1.0])
                 ]);
 
 
-                self.spindle_on |= ui.button(im_str!("On"), [ww / 2.0 - 10.0, 24.0]);
+                if ui.button(im_str!("On##Spindle On"), [ww / 2.0 - 10.0, 24.0]) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_string(format!("M3 S{}", self.spindle_rpm_setpoint));
+                    }
+                }
 
                 tok.pop(ui);
 
                 ui.same_line(ww / 2.0 + 10.0);
 
                 let tok = ui.push_style_colors(&[
-                    (StyleColor::Button,        if self.spindle_on {[0.5, 0.0, 0.0, 1.0]} else {[0.1, 0.0, 0.0, 1.0]}),
-                    (StyleColor::ButtonActive,  if self.spindle_on {[0.75, 0.0, 0.0, 1.0]} else {[0.1, 0.0, 0.0, 1.0]}),
-                    (StyleColor::ButtonHovered, if self.spindle_on {[1.0, 0.0, 0.0, 1.0]} else {[0.1, 0.0, 0.0, 1.0]})
+                    (StyleColor::Button,        [0.5, 0.0, 0.0, 1.0]),
+                    (StyleColor::ButtonActive,  [0.75, 0.0, 0.0, 1.0]),
+                    (StyleColor::ButtonHovered, [1.0, 0.0, 0.0, 1.0])
                 ]);
-                self.spindle_on &= !ui.button(im_str!("Off"), [ww / 2.0 - 10.0, 24.0]);
+                if ui.button(im_str!("Off##Spindle Off"), [ww / 2.0 - 10.0, 24.0]) {
 
-                if self.spindle_on != prev_spindle_on {
-                    // send message to change spindle state
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_string(format!("M5"));
+                    }
                 }
 
                 tok.pop(ui);    
 
                 ui.separator();
+                ui.text("Overrides");
+                ui.separator();
+
+                ui.text(format!("Spindle Override:      {:>3}%", machine_status.override_speed));
+
+                if ui.small_button(im_str!("-10%##Spindle Override -10")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SpindleOverrideDec10);
+                    }
+                }
+                ui.same_line(48.0);
+                if ui.small_button(im_str!("-1%##Spindle Override -1")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SpindleOverrideDec01);
+                    }
+                }
+                ui.same_line(48.0+32.0);
+                if ui.small_button(im_str!("+1%##Spindle Override +1")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SpindleOverrideInc01);
+                    }
+                }
+                ui.same_line(48.0+32.0+32.0);
+                if ui.small_button(im_str!("+10%##Spindle Override +10")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SpindleOverrideInc10);
+                    }
+                }
+                ui.same_line(48.0+32.0+32.0+40.0);
+                if ui.small_button(im_str!("Reset##Spindle Override Reset")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::SpindleOverrideReset);
+                    }
+                }
+
+                ui.text(format!("Feed Override:         {:>3}%", machine_status.override_feed));
+
+                if ui.small_button(im_str!("-10%##Feed Override -10")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedOverrideDec10);
+                    }
+                }
+                ui.same_line(48.0);
+                if ui.small_button(im_str!("-1%##Feed Override -1")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedOverrideDec01);
+                    }
+                }
+                ui.same_line(48.0+32.0);
+                if ui.small_button(im_str!("+1%##Feed Override +1")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedOverrideInc01);
+                    }
+                }
+                ui.same_line(48.0+32.0+32.0);
+                if ui.small_button(im_str!("+10%##Feed Override +10")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedOverrideInc10);
+                    }
+                }
+                ui.same_line(48.0+32.0+32.0+40.0);
+                if ui.small_button(im_str!("Reset##Feed Override Reset")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::FeedOverrideReset);
+                    }
+                }
+
+
+                ui.text(format!("Rapid Override:        {:>3}%", machine_status.override_rapid));
+
+                if ui.small_button(im_str!(" 25%##Rapid Override 25")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::RapidOverrideQuarter);
+                    }
+                }
+                ui.same_line(48.0);
+                if ui.small_button(im_str!("50%##Rapid Override 50")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::RapidOverrideHalf);
+                    }
+                }
+                ui.same_line(48.0+32.0);
+                if ui.small_button(im_str!("100%##Rapid Override 100")) {
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_realtime_command(crate::grbl::GRBLRealtimeCommand::RapidOverrideFull);
+                    }
+                }
+
 
                 ui.separator();
                 ui.text("Jogging");
                 ui.separator();
 
+                ui.input_float(im_str!("Jog Feed"), &mut self.jog_feed_rate)
+                    .build();
+
+                ui.text("Jog X");
+                let mut jog_x = 0;
+                if ui.small_button(im_str!("   <<   ##Jog X -10")) {jog_x = -10;}
+                ui.same_line(8.0 + 1.0*72.0);
+                if ui.small_button(im_str!("    <   ##Jog X  -1")) {jog_x =  -1;}
+                ui.same_line(8.0 + 2.0*72.0);
+                if ui.small_button(im_str!("   >    ##Jog X  10")) {jog_x =   1;}
+                ui.same_line(8.0 + 3.0*72.0);
+                if ui.small_button(im_str!("   >>   ##Jog X   1")) {jog_x =  10;}
+
+                ui.text("Jog Y");
+                let mut jog_y = 0;
+                if ui.small_button(im_str!("   vv   ##Jog Y -10")) {jog_y = -10;}
+                ui.same_line(8.0 + 1.0*72.0);
+                if ui.small_button(im_str!("    v   ##Jog Y  -1")) {jog_y =  -1;}
+                ui.same_line(8.0 + 2.0*72.0);
+                if ui.small_button(im_str!("   ^    ##Jog Y  10")) {jog_y =   1;}
+                ui.same_line(8.0 + 3.0*72.0);
+                if ui.small_button(im_str!("   ^^   ##Jog Y   1")) {jog_y =  10;}
+
+                ui.text("Jog Z");
+                let mut jog_z = 0;
+                if ui.small_button(im_str!("   vv   ##Jog Z -10")) {jog_z = -10;}
+                ui.same_line(8.0 + 1.0*72.0);
+                if ui.small_button(im_str!("    v   ##Jog Z  -1")) {jog_z =  -1;}
+                ui.same_line(8.0 + 2.0*72.0);
+                if ui.small_button(im_str!("   ^    ##Jog Z   1")) {jog_z =   1;}
+                ui.same_line(8.0 + 3.0*72.0);
+                if ui.small_button(im_str!("   ^^   ##Jog Z  10")) {jog_z =  10;}
+
+                if let Some(ref conn) = self.connection {
+
+                    if jog_x != 0 {
+                        conn.1.send_command(GRBLCommand::Jog{
+                            x: Some(jog_x as f32),
+                            y: None,
+                            z: None,
+                            feed: 100.0,
+                            incremental: true,
+                            machine_coords: false,
+                        });
+                    }
+
+                    if jog_y != 0 {
+                        conn.1.send_command(GRBLCommand::Jog{
+                            x: None,
+                            y: Some(jog_y as f32),
+                            z: None,
+                            feed: 100.0,
+                            incremental: true,
+                            machine_coords: false,
+                        });
+                    }
+
+                    if jog_z != 0 {
+                        conn.1.send_command(GRBLCommand::Jog{
+                            x: None,
+                            y: None,
+                            z: Some(jog_z as f32),
+                            feed: 100.0,
+                            incremental: true,
+                            machine_coords: false,
+                        });
+                    }
+                }
+
+
                 ui.separator();
                 ui.text("Move to Point");
                 ui.separator();
 
-                ui.input_text(im_str!("Command Input"), &mut self.command_input)
-                    .build();
-
-
-                if ui.small_button(im_str!("Send Command")) {
-                    if let Some((_, ref conn)) = self.connection {
-                        conn.send_string(self.command_input.to_string());
-                        self.command_input.clear();
-                    }
-                }
             });
 
 
@@ -572,5 +791,7 @@ impl UIState {
             });
 
         tok.pop(ui);
+
+        self.previous_frame_end = Instant::now();
     }
 }

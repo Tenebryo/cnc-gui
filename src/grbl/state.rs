@@ -157,4 +157,44 @@ impl GRBLSettings {
             _ => None,
         }
     }
+
+    pub fn parse_setting(&mut self, index : u8, value: &str) {
+        match index {
+            0   => {self.step_pulse_micros       = value.parse::<u16>().unwrap();}
+            1   => {self.step_idle_millis        = value.parse::<u8>().unwrap();}
+            2   => {self.step_invert_mask        = AxisMask::from_bits(value.parse::<u8>().unwrap()).unwrap();}
+            3   => {self.direction_invert_mask   = AxisMask::from_bits(value.parse::<u8>().unwrap()).unwrap();}
+            4   => {self.step_enable_invert      = value.parse::<u8>().unwrap() != 0;}
+            5   => {self.limit_pin_invert        = value.parse::<u8>().unwrap() != 0;}
+            6   => {self.probe_pin_invert        = value.parse::<u8>().unwrap() != 0;}
+            10  => {self.status_report_mask      = StatusReportMask::from_bits(value.parse::<u8>().unwrap()).unwrap();}
+            11  => {self.junction_deviation      = value.parse::<f32>().unwrap();}
+            12  => {self.arc_tolerance           = value.parse::<f32>().unwrap();}
+            13  => {self.report_inches           = value.parse::<u8>().unwrap() != 0;}
+            20  => {self.soft_limits_enable      = value.parse::<u8>().unwrap() != 0;}
+            21  => {self.hard_limits_enable      = value.parse::<u8>().unwrap() != 0;}
+            22  => {self.homing_cycle_enable     = value.parse::<u8>().unwrap() != 0;}
+            23  => {self.homing_direction_mask   = AxisMask::from_bits(value.parse::<u8>().unwrap()).unwrap();}
+            24  => {self.homing_locate_rate      = value.parse::<f32>().unwrap();}
+            25  => {self.homing_search_rate      = value.parse::<f32>().unwrap();}
+            26  => {self.homing_switch_debounce  = value.parse::<f32>().unwrap() as u16;}
+            27  => {self.homing_pulloff_distance = value.parse::<f32>().unwrap();}
+            30  => {self.spindle_max_speed       = value.parse::<f32>().unwrap();}
+            31  => {self.spindle_min_speed       = value.parse::<f32>().unwrap();}
+            32  => {self.laser_mode              = value.parse::<u8>().unwrap() != 0;}
+            100 => {self.steps_per_mm_x          = value.parse::<f32>().unwrap();}
+            101 => {self.steps_per_mm_y          = value.parse::<f32>().unwrap();}
+            102 => {self.steps_per_mm_z          = value.parse::<f32>().unwrap();}
+            110 => {self.max_rate_x              = value.parse::<f32>().unwrap();}
+            111 => {self.max_rate_y              = value.parse::<f32>().unwrap();}
+            112 => {self.max_rate_z              = value.parse::<f32>().unwrap();}
+            120 => {self.acceleration_x          = value.parse::<f32>().unwrap();}
+            121 => {self.acceleration_y          = value.parse::<f32>().unwrap();}
+            122 => {self.acceleration_z          = value.parse::<f32>().unwrap();}
+            130 => {self.max_travel_x            = value.parse::<f32>().unwrap();}
+            131 => {self.max_travel_y            = value.parse::<f32>().unwrap();}
+            132 => {self.max_travel_z            = value.parse::<f32>().unwrap();}
+            _ => {},
+        }
+    }
 }

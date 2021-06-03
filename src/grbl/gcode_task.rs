@@ -47,13 +47,8 @@ impl GCodeTaskHandle {
         self.sender.send(GCodeTaskMessage::StopProgram).unwrap();
     }
 
-    pub fn send_realtime_command(&self, cmd : GRBLRealtimeCommand) -> bool {
-        if !self.has_gcode.load(Ordering::SeqCst) {
-            self.sender.send(GCodeTaskMessage::RealtimeCommand(cmd)).unwrap();
-            true
-        } else {
-            false
-        }
+    pub fn send_realtime_command(&self, cmd : GRBLRealtimeCommand) {
+        self.sender.send(GCodeTaskMessage::RealtimeCommand(cmd)).unwrap();
     }
 
     pub fn send_command(&self, cmd : GRBLCommand) -> bool {

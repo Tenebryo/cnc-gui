@@ -26,6 +26,7 @@ bitflags! {
 }
 
 
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum GRBLRealtimeCommand {
     SoftReset  = 0x18,
