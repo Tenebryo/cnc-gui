@@ -65,7 +65,7 @@ impl Viewport {
             let depth_buffer = AttachmentImage::transient_multisampled_input_attachment(
                 system.device.clone(), 
                 [width, height],
-                4,
+                vulkano::image::SampleCount::Sample4,
                 Format::D16Unorm
             ).unwrap();
 
@@ -73,7 +73,7 @@ impl Viewport {
             let msaa_buffer = AttachmentImage::transient_multisampled_input_attachment(
                 system.device.clone(), 
                 [width, height],
-                4,
+                vulkano::image::SampleCount::Sample4,
                 Format::R8G8B8A8Unorm
             ).unwrap();
 

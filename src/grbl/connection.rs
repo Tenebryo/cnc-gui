@@ -67,7 +67,7 @@ impl GRBLConnection {
         read_buffer.extend_from_slice(&buf[..n]);
 
         //check if the message is complete
-        if let Some(n) = self.handle_message(std::str::from_utf8(&read_buffer).expect("utf-8 encoding error")) {
+        if let Some(n) = self.handle_message(std::str::from_utf8(&read_buffer)?) {
             read_buffer.drain(0..n);
         }
 
@@ -165,7 +165,7 @@ impl GRBLConnection {
                                             let x = inner.next().unwrap().as_str().parse::<f32>().unwrap();
                                             let y = inner.next().unwrap().as_str().parse::<f32>().unwrap();
                                             let z = inner.next().unwrap().as_str().parse::<f32>().unwrap();
-
+                                            
                                             self.machine_status.work_offset = [x,y,z];
                                         }
                                         Rule::buffer_state => {

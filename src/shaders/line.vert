@@ -1,6 +1,6 @@
 #version 450
 
-layout(push_constant) uniform PushConstants {
+layout(set=0, binding=0) uniform UniformBlock {
   mat4 matrix;
   vec2 viewport;
 };

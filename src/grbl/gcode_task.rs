@@ -209,7 +209,9 @@ pub fn start_gcode_sender_task(path : String, baud_rate : u32) -> GCodeTaskHandl
                     }
                 }
 
-                grbl.poll().unwrap();
+                if grbl.poll().is_err() {
+                    break;
+                }
 
                 *grbl_status.lock().unwrap() = grbl.machine_status.clone();
             }

@@ -1,7 +1,9 @@
 use imgui::{Context, FontConfig, FontSource};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
 
+use vulkano::Version;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBufferUsage, PrimaryAutoCommandBuffer};
+use vulkano::device::Features;
 use vulkano::device::Queue;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::format::Format;
@@ -48,7 +50,7 @@ pub fn init(title: &str, event_loop : &EventLoop<()>) -> System {
 
 
     let required_extensions = vulkano_win::required_extensions();
-    let instance = Instance::new(None, &required_extensions, None).unwrap();
+    let instance = Instance::new(None, Version::V1_0, &required_extensions, None).unwrap();
     
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
 
@@ -77,7 +79,10 @@ pub fn init(title: &str, event_loop : &EventLoop<()>) -> System {
     };
     let (device, mut queues) = Device::new(
         physical,
-        physical.supported_features(),
+        &Features{
+            shading_rate_image : false,
+            ..*physical.supported_features()
+        },
         &device_ext,
         [(queue_family, 0.5)].iter().cloned(),
     )

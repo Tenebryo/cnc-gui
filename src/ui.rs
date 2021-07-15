@@ -29,6 +29,7 @@ pub struct UIState {
     pub active_program              : Option<GcodeProgram>,
     pub machine_coords              : [f32; 3],
     pub work_coords                 : [f32; 3],
+    pub work_coord_system           : usize,
     pub main_loop_start             : Instant,
     pub scale                       : f32,
     pub center                      : Vector3<f32>,
@@ -40,6 +41,7 @@ pub struct UIState {
     pub command_history             : Vec<String>,
     pub previous_frame_end          : Instant,
     pub jog_feed_rate               : f32,
+    pub jog_distance                : usize,
 }
 
 impl UIState {
@@ -89,6 +91,7 @@ impl UIState {
             active_program,
             machine_coords,
             work_coords,
+            work_coord_system : 1,
             main_loop_start,
             scale,
             center,
@@ -100,6 +103,7 @@ impl UIState {
             command_history : vec![],
             previous_frame_end : Instant::now(),
             jog_feed_rate : 200.0,
+            jog_distance : 2,
         }
     }
 
@@ -393,7 +397,7 @@ impl UIState {
 
 
         // this window contains controls used to give realtime commands
-        // to GRBL, such as feed hold, cycle start, abort, and jog.
+        // to GRBL, such as feed hold, cycle start, and abort.
         imgui::Window::new(im_str!("Command Input"))
             .position(state_window_rect.pos, imgui::Condition::Always)
             .size(state_window_rect.size, imgui::Condition::Always)
@@ -402,8 +406,14 @@ impl UIState {
             .resizable(false)
             .build(ui, || {
 
+                if self.connection.is_none() {
+                    ui.text("Connect to a controller.");
+                    return;
+                }
+
                 let hit_enter = ui.input_text(im_str!("##Command Input"), &mut self.command_input)
                     .enter_returns_true(true)
+                    .resize_buffer(true)
                     .build();
 
 
@@ -434,6 +444,10 @@ impl UIState {
             .resizable(false)
             .build(ui, || {
 
+                if self.connection.is_none() {
+                    ui.text("Connect to a controller.");
+                    return;
+                }
 
                 let [ww, wh] = ui.window_content_region_max();
 
@@ -509,15 +523,81 @@ impl UIState {
 
                 self.machine_coords = machine_status.machine_position;
                 for i in 0..3 {
-                    self.work_coords[i] = machine_status.machine_position[i] + machine_status.work_offset[i];
+                    self.work_coords[i] = machine_status.machine_position[i] - machine_status.work_offset[i];
                 }
 
                 if ui.input_float3(im_str!("Machine Coords"), &mut self.machine_coords).build() {
                     //set machine offset
                 }
 
-                if ui.input_float3(im_str!("Work Coords"), &mut self.work_coords).build() {
+                if ui.input_float3(im_str!("Work Coords"), &mut self.work_coords)
+                    .enter_returns_true(true)
+                    .build() {
+                    
+                    
                     //set work offset
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_string(format!("G10 P0 L2 X{} Y{} Z{}", 
+                            self.machine_coords[0] - self.work_coords[0],
+                            self.machine_coords[1] - self.work_coords[1],
+                            self.machine_coords[2] - self.work_coords[2]
+                        ));
+                    }
+                }
+
+                let mut work_offset = machine_status.work_offset;
+
+                if ui.input_float3(im_str!("Work Offset"), &mut work_offset)
+                    .enter_returns_true(true)
+                    .build() {
+                    //set work offset
+                    
+                    if let Some(ref conn) = self.connection {
+                        conn.1.send_string(format!("G10 P0 L2 X{} Y{} Z{}", 
+                            work_offset[0],
+                            work_offset[1],
+                            work_offset[2]
+                        ));
+                    }
+                }
+
+                let work_coords = [
+                    im_str!("G53"),
+                    im_str!("G54"),
+                    im_str!("G55"),
+                    im_str!("G56"),
+                    im_str!("G57"),
+                    im_str!("G58"),
+                    im_str!("G59"),
+                ];
+
+                if imgui::ComboBox::new(im_str!("Work Coordinate System")).build_simple_string(ui, &mut self.work_coord_system, &work_coords) {
+                    if let Some(ref conn) = self.connection {
+                        match self.work_coord_system {
+                            0 => {conn.1.send_string(format!("G53"));}
+                            1 => {conn.1.send_string(format!("G54"));}
+                            2 => {conn.1.send_string(format!("G55"));}
+                            3 => {conn.1.send_string(format!("G56"));}
+                            4 => {conn.1.send_string(format!("G57"));}
+                            5 => {conn.1.send_string(format!("G58"));}
+                            6 => {conn.1.send_string(format!("G59"));}
+                            _ => panic!()
+                        }
+                    }
+                }
+
+                if let Some(ref conn) = self.connection {
+                    if self.work_coord_system != 0 {
+                        if ui.small_button(im_str!("X = 0")) {conn.1.send_string(format!("G10 P0 L2 X{}", -machine_status.machine_position[0]));}
+                        ui.same_line(64.0);
+                        if ui.small_button(im_str!("Y = 0")) {conn.1.send_string(format!("G10 P0 L2 Y{}", -machine_status.machine_position[1]));}
+                        ui.same_line(128.0);
+                        if ui.small_button(im_str!("Z = 0")) {conn.1.send_string(format!("G10 P0 L2 Z{}", -machine_status.machine_position[2]));}
+                        
+                        if ui.small_button(im_str!("XY = 0")) {conn.1.send_string(format!("G10 P0 L2 X{} Y{}", -machine_status.machine_position[0], -machine_status.machine_position[1]));}
+                        ui.same_line(64.0);
+                        if ui.small_button(im_str!("XYZ = 0")) {conn.1.send_string(format!("G10 P0 L2 X{} Y{} Z{}", -machine_status.machine_position[0], -machine_status.machine_position[1], -machine_status.machine_position[2]));}
+                    }
                 }
 
                 let prev_spindle_on = machine_status.spindle_cw || machine_status.spindle_ccw;
@@ -663,6 +743,13 @@ impl UIState {
                 ui.input_float(im_str!("Jog Feed"), &mut self.jog_feed_rate)
                     .build();
 
+                let jog_distances = [ 0.001, 0.01, 0.1, 1.0, 10.0, 100.0 ];
+
+                imgui::ComboBox::new(im_str!("Jog Distance"))
+                    .build_simple(ui, &mut self.jog_distance, &jog_distances, &|x : &f32| std::borrow::Cow::Owned(im_stringf!("{:3.3}", x)));
+                
+                let jog_distance = jog_distances[self.jog_distance];
+
                 ui.text("Jog X");
                 let mut jog_x = 0;
                 if ui.small_button(im_str!("   <<   ##Jog X -10")) {jog_x = -10;}
@@ -697,10 +784,10 @@ impl UIState {
 
                     if jog_x != 0 {
                         conn.1.send_command(GRBLCommand::Jog{
-                            x: Some(jog_x as f32),
+                            x: Some(jog_distance * jog_x as f32),
                             y: None,
                             z: None,
-                            feed: 100.0,
+                            feed: self.jog_feed_rate,
                             incremental: true,
                             machine_coords: false,
                         });
@@ -709,9 +796,9 @@ impl UIState {
                     if jog_y != 0 {
                         conn.1.send_command(GRBLCommand::Jog{
                             x: None,
-                            y: Some(jog_y as f32),
+                            y: Some(jog_distance * jog_y as f32),
                             z: None,
-                            feed: 100.0,
+                            feed: self.jog_feed_rate,
                             incremental: true,
                             machine_coords: false,
                         });
@@ -721,8 +808,8 @@ impl UIState {
                         conn.1.send_command(GRBLCommand::Jog{
                             x: None,
                             y: None,
-                            z: Some(jog_z as f32),
-                            feed: 100.0,
+                            z: Some(jog_distance * jog_z as f32),
+                            feed: self.jog_feed_rate,
                             incremental: true,
                             machine_coords: false,
                         });

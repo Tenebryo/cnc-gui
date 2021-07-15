@@ -8,6 +8,7 @@ use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::DynamicState;
 use vulkano::command_buffer::PrimaryAutoCommandBuffer;
 use vulkano::command_buffer::SubpassContents;
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::format::ClearValue;
 use vulkano::format::Format;
 use vulkano::memory::pool::StdMemoryPool;
@@ -41,6 +42,7 @@ pub struct GCodeRenderer {
     pub render_pass : Arc<RenderPass>,
     pub image : Option<Arc<StorageImage>>,
     pub vertex_pool : CpuBufferPool<Vertex>,
+    pub uniform_pool : CpuBufferPool<line_vs::ty::UniformBlock>,
     pub vertex_buffer : Option<Arc<CpuBufferPoolChunk<Vertex, Arc<StdMemoryPool>>>>,
     pub texture_id : Option<TextureId>,
 }
@@ -105,12 +107,14 @@ impl GCodeRenderer {
         );
 
         let vertex_pool = CpuBufferPool::<Vertex>::new(system.device.clone(), BufferUsage::all());
+        let uniform_pool = CpuBufferPool::<line_vs::ty::UniformBlock>::new(system.device.clone(), BufferUsage::all());
 
         GCodeRenderer {
             render_pass,
             pipeline,
             image : None,
             vertex_pool,
+            uniform_pool,
             vertex_buffer : None,
             texture_id : None,
         }
@@ -147,13 +151,21 @@ impl GCodeRenderer {
                     ..DynamicState::none()
                 };
 
-                cmd_buf_builder.draw(
-                    self.pipeline.clone(), &ds, vec![vb.clone()], (), 
-                        line_vs::ty::PushConstants {
+                let layout = self.pipeline.layout().descriptor_set_layout(0).unwrap();
+                let desc_set = Arc::new(PersistentDescriptorSet::start(layout.clone())
+                    .add_buffer(self.uniform_pool.next(
+                        line_vs::ty::UniformBlock {
                             matrix : (v_matrix * tmatrix).into(),
                             viewport : [width as f32, height as f32],
-                        },
-                        vec![]
+                        }
+                    ).unwrap()).unwrap()
+                    .build().unwrap()
+                );
+
+                cmd_buf_builder.draw(
+                    self.pipeline.clone(), &ds, vec![vb.clone()], 
+                        desc_set, 
+                        (), vec![]
                     )
                     .expect("failed to draw line");
             }

@@ -17,6 +17,12 @@ macro_rules! im_strf {
     };
 }
 
+macro_rules! im_stringf {
+    ($($args:tt)*) => {
+        imgui::ImString::from(format!($($args)*))
+    };
+}
+
 mod grbl;
 mod simulation;
 mod imgui_renderer;
